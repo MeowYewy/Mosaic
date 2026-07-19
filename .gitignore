@@ -1,0 +1,29 @@
+# Build
+build/
+build-test/
+cmake-build-*/
+out/
+dist/
+*.user
+*.autosave
+CMakeLists.txt.user
+.qt/
+.qmlcache/
+*.qmlc
+*.jsc
+
+# IDE
+.idea/
+.vscode/
+.qtcreator/
+*.pro.user*
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# OCR language packs (large; copy via setup-tesseract.bat)
+tools/tesseract/tessdata/*.traineddata
+tools/tesseract/*.dll
+tools/tesseract/tesseract.exe
