@@ -13,6 +13,10 @@
   #define OutputDir "..\..\dist\artifacts"
 #endif
 
+#ifndef AppIconFile
+  #define AppIconFile "..\..\resources\app-icon.ico"
+#endif
+
 [Setup]
 AppId={{B7E4A2C1-9D3F-4E8A-B6C5-1F0E2D3A4B5C}
 AppName=Mosaic
@@ -33,6 +37,8 @@ UninstallDisplayName=Mosaic {#AppVersion}
 CloseApplications=force
 CloseApplicationsFilter=Mosaic.exe
 AppMutex=MosaicAppMutex
+SetupIconFile={#AppIconFile}
+UninstallDisplayIcon={#AppIconFile}
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "languages\ChineseSimplified.isl"
@@ -45,9 +51,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Mosaic"; Filename: "{app}\Mosaic.exe"
+Name: "{group}\Mosaic"; Filename: "{app}\Mosaic.exe"; IconFilename: "{app}\Mosaic.exe"
 Name: "{group}\{cm:UninstallProgram,Mosaic}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Mosaic"; Filename: "{app}\Mosaic.exe"; Tasks: desktopicon
+Name: "{autodesktop}\Mosaic"; Filename: "{app}\Mosaic.exe"; IconFilename: "{app}\Mosaic.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\Mosaic.exe"; Description: "{cm:LaunchProgram,Mosaic}"; Flags: nowait postinstall skipifsilent

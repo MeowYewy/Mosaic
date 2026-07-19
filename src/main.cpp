@@ -37,6 +37,11 @@ int main(int argc, char *argv[])
     app.setApplicationName(QStringLiteral("Mosaic"));
     app.setApplicationVersion(QStringLiteral("0.1.0"));
 
+    QIcon appIcon(QStringLiteral(":/qt/qml/ProjectO/resources/app-icon.png"));
+    if (appIcon.isNull())
+        appIcon = QIcon(QStringLiteral(":/qt/qml/ProjectO/resources/logo.svg"));
+    app.setWindowIcon(appIcon);
+
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     auto *maskPreviewProvider = new PreviewImageProvider();
@@ -98,7 +103,7 @@ int main(int argc, char *argv[])
 
     if (!engine.rootObjects().isEmpty()) {
         if (auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first())) {
-            window->setIcon(QIcon(QStringLiteral(":/qt/qml/ProjectO/resources/logo.svg")));
+            window->setIcon(appIcon);
             fileDropBridge.attachWindow(window);
         }
         return app.exec();

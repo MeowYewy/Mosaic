@@ -159,6 +159,7 @@ qt_add_qml_module(Mosaic
         qml/pages/WatermarkPage.qml
     RESOURCES
         resources/logo.svg
+        resources/app-icon.png
         resources/update.json
         resources/changelog.json
         resources/icons/full-screen.svg
@@ -210,6 +211,9 @@ endif()
 
 if(WIN32)
     set_target_properties(Mosaic PROPERTIES WIN32_EXECUTABLE TRUE)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/resources/app-icon.ico")
+        target_sources(Mosaic PRIVATE "${CMAKE_SOURCE_DIR}/resources/app-icon.rc")
+    endif()
 
     find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS "${QT_ROOT}/bin")
     if(WINDEPLOYQT_EXECUTABLE)

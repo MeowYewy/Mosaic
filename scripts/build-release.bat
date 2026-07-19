@@ -10,6 +10,11 @@ echo Qt: %QT_DIR%
 echo Output: %BUILD_EXE%
 echo.
 
+python "%~dp0generate-app-icon.py"
+if errorlevel 1 (
+    echo WARNING: app-icon generation failed; using existing resources\app-icon.* if present.
+)
+
 if not exist "%PROJECT_ROOT%\build\release" mkdir "%PROJECT_ROOT%\build\release"
 
 cmake -S "%PROJECT_ROOT%" -B "%PROJECT_ROOT%\build\release" -G "Ninja" ^
