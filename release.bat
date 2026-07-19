@@ -33,7 +33,7 @@ echo.
 echo Next: publish to GitHub + Gitee (installer + portable):
 echo   set GITHUB_TOKEN=... ^& set GITEE_TOKEN=... ^& scripts\publish-dual.bat
 echo.
-echo Or manually tag v%APP_VERSION% on PageCase repo and upload from %ARTIFACT_DIR%
-echo Update manifest branch: Mosaic/resources/update.json
+echo Or manually tag v%APP_VERSION% on MeowYewy/Mosaic (GitHub + Gitee) and upload from %ARTIFACT_DIR%
+echo Update manifest: main/resources/update.json on both remotes
 echo.
 endlocal

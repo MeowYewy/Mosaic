@@ -22,17 +22,17 @@
 
 namespace {
 
+// Probe GitHub + Gitee in parallel; first valid manifest wins (others aborted).
 constexpr auto kManifestGitHub =
-    "https://raw.githubusercontent.com/MeowYewy/PageCase/Mosaic/resources/update.json";
-constexpr auto kManifestGitHubLegacy =
-    "https://raw.githubusercontent.com/MeowYewy/PageCase/main/resources/update.json";
+    "https://raw.githubusercontent.com/MeowYewy/Mosaic/main/resources/update.json";
 constexpr auto kManifestMirror =
-    "https://gitee.com/MeowYewy/pagecase/raw/Mosaic/resources/update.json";
+    "https://gitee.com/MeowYewy/mosaic/raw/main/resources/update.json";
 
 constexpr auto kDefaultSilentInstallArgs =
     "/SILENT /SUPPRESSMSGBOXES /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS";
 
 constexpr qint64 kMinInstallerBytes = 512 * 1024;
+// Small parallel probe only — first source to deliver this many bytes wins the full download.
 constexpr qint64 kSpeedProbeBytes = 256 * 1024;
 
 QStringList splitVersion(const QString &version)
@@ -70,8 +70,7 @@ UpdateChecker::UpdateChecker(QObject *parent)
     , m_network(new QNetworkAccessManager(this))
     , m_changelog(loadChangelog())
     , m_manifestUrls({QString::fromUtf8(kManifestGitHub),
-                      QString::fromUtf8(kManifestMirror),
-                      QString::fromUtf8(kManifestGitHubLegacy)})
+                      QString::fromUtf8(kManifestMirror)})
 {
 }
 
@@ -208,9 +207,10 @@ QStringList UpdateChecker::expandDownloadMirrors(const QStringList &urls, const 
     for (const QString &u : urls)
         appendUnique(u);
 
-    appendUnique(QStringLiteral("https://github.com/MeowYewy/PageCase/releases/download/%1/%2")
+    // Same asset on Gitee — race at download time; slower source is aborted.
+    appendUnique(QStringLiteral("https://github.com/MeowYewy/Mosaic/releases/download/%1/%2")
                      .arg(tag, fileName));
-    appendUnique(QStringLiteral("https://gitee.com/MeowYewy/pagecase/releases/download/%1/%2")
+    appendUnique(QStringLiteral("https://gitee.com/MeowYewy/mosaic/releases/download/%1/%2")
                      .arg(tag, fileName));
 
     static const QRegularExpression releasePath(

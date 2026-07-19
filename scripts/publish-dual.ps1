@@ -60,7 +60,7 @@ function Invoke-GitHubRelease {
             draft            = $false
             prerelease       = $false
             generate_release_notes = $false
-            target_commitish = "Mosaic"
+            target_commitish = "main"
         } | ConvertTo-Json
         $release = Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$Owner/$Repo/releases" -Headers $headers -Body $payload -ContentType "application/json; charset=utf-8"
         Write-Host "Created GitHub release $Tag (id=$($release.id))"
@@ -113,7 +113,7 @@ function Invoke-GiteeRelease {
             tag_name         = $Tag
             name             = $Title
             body             = $Body
-            target_commitish = "Mosaic"
+            target_commitish = "main"
             prerelease       = $false
         }
         $created = Invoke-RestMethod -Method Post -Uri "$base/releases" -Body $payload
@@ -162,12 +162,13 @@ Write-Host ""
 Write-Host "=== Publishing $title to GitHub + Gitee ==="
 Write-Host ""
 
-$ghUrl = Invoke-GitHubRelease -Token $ghToken -Owner "MeowYewy" -Repo "PageCase" -Tag $tag -Title $title -Body $notes -Assets $assets
-$giteeUrl = Invoke-GiteeRelease -Token $giteeToken -Owner "MeowYewy" -Repo "pagecase" -Tag $tag -Title $title -Body $notes -Assets $assets
+$ghUrl = Invoke-GitHubRelease -Token $ghToken -Owner "MeowYewy" -Repo "Mosaic" -Tag $tag -Title $title -Body $notes -Assets $assets
+$giteeUrl = Invoke-GiteeRelease -Token $giteeToken -Owner "MeowYewy" -Repo "mosaic" -Tag $tag -Title $title -Body $notes -Assets $assets
 
 Write-Host ""
 Write-Host "GitHub: $ghUrl"
 Write-Host "Gitee:  $giteeUrl"
 Write-Host ""
-Write-Host "Ensure resources/update.json on Mosaic branch matches:"
-Write-Host "  https://github.com/MeowYewy/PageCase/releases/download/$tag/Mosaic_${Version}_win64_Setup.exe"
+Write-Host "Ensure resources/update.json on main matches (GitHub or Gitee — app picks the faster source):"
+Write-Host "  https://github.com/MeowYewy/Mosaic/releases/download/$tag/Mosaic_${Version}_win64_Setup.exe"
+Write-Host "  https://gitee.com/MeowYewy/mosaic/releases/download/$tag/Mosaic_${Version}_win64_Setup.exe"
