@@ -64,6 +64,21 @@ Rectangle {
                     strokeColor: Theme.iconDefault
                 }
             }
+
+            Rectangle {
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.topMargin: 5
+                anchors.rightMargin: 5
+                width: 7
+                height: 7
+                radius: width / 2
+                color: Theme.accent
+                visible: UpdateChecker.hasUpdate
+                border.width: 1.5
+                border.color: Theme.surface
+            }
+
             onClicked: header.menuRequested(menuBtn)
         }
     }
