@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Mosaic VERSION 0.1.0 LANGUAGES CXX)
+project(Mosaic VERSION 0.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -167,6 +167,7 @@ qt_add_qml_module(Mosaic
         resources/icons/square.svg
         resources/icons/square-filled.svg
         resources/icons/mouse-pointer-2.svg
+        resources/icons/square-dashed-mouse-pointer.svg
         resources/icons/trash-2.svg
         resources/icons/grid-3x3.svg
         resources/icons/eye.svg

@@ -34,6 +34,10 @@ constexpr auto kDefaultSilentInstallArgs =
 constexpr qint64 kMinInstallerBytes = 512 * 1024;
 // Small parallel probe only — first source to deliver this many bytes wins the full download.
 constexpr qint64 kSpeedProbeBytes = 256 * 1024;
+// Re-check for updates while the app stays open (manifest only; skips if busy).
+constexpr int kPeriodicUpdateCheckMs = 30 * 60 * 1000;
+// UI preview only — set false before shipping / 发布前改回 false
+constexpr bool kSimulateUpdatePreview = false;
 
 QStringList splitVersion(const QString &version)
 {
@@ -72,6 +76,10 @@ UpdateChecker::UpdateChecker(QObject *parent)
     , m_manifestUrls({QString::fromUtf8(kManifestGitHub),
                       QString::fromUtf8(kManifestMirror)})
 {
+    m_periodicCheckTimer = new QTimer(this);
+    m_periodicCheckTimer->setInterval(kPeriodicUpdateCheckMs);
+    connect(m_periodicCheckTimer, &QTimer::timeout, this, &UpdateChecker::checkForUpdates);
+    m_periodicCheckTimer->start();
 }
 
 QVariantList UpdateChecker::loadChangelog()
@@ -233,10 +241,39 @@ QStringList UpdateChecker::expandDownloadMirrors(const QStringList &urls, const 
     return out;
 }
 
+void UpdateChecker::simulateUpdatePreview()
+{
+    abortAllNetworkReplies();
+    m_manifestResolved = false;
+    setStatus(Checking);
+
+    QTimer::singleShot(900, this, [this]() {
+        if (m_installLaunched)
+            return;
+
+        m_latestVersion = QStringLiteral("0.2.0");
+        m_downloadUrl = QStringLiteral("https://github.com/MeowYewy/Mosaic/releases/download/v0.2.0/"
+                                       "Mosaic_0.2.0_win64_Setup.exe");
+        m_downloadProgress = 100;
+        emit latestVersionChanged();
+        emit downloadUrlChanged();
+        emit downloadProgressChanged();
+
+        setHasUpdate(true);
+        setStatus(ReadyToInstall);
+        emit installerReadyChanged();
+    });
+}
+
 void UpdateChecker::checkForUpdates()
 {
     if (m_status == Checking || m_status == Downloading || m_installLaunched)
         return;
+
+    if (kSimulateUpdatePreview) {
+        simulateUpdatePreview();
+        return;
+    }
 
     abortAllNetworkReplies();
     m_manifestResolved = false;

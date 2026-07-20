@@ -46,12 +46,61 @@ PageSlot::Kind kindForExt(const QString &ext)
 {
     if (ext == QLatin1String("pdf"))
         return PageSlot::Pdf;
-    if (ext == QLatin1String("docx") || ext == QLatin1String("doc"))
+    if (ext == QLatin1String("docx") || ext == QLatin1String("doc")
+        || ext == QLatin1String("docm") || ext == QLatin1String("rtf")
+        || ext == QLatin1String("odt"))
         return PageSlot::Docx;
     return PageSlot::Image;
 }
 
 } // namespace
+
+DocxFileCache DocumentLoader::buildDocxCacheEntry(const QString &path)
+{
+    if (OfficeConverter::isWordDocument(path) && OfficeConverter::available()) {
+        QString convertError;
+        const QString pdf = OfficeConverter::toPdfCached(path, &convertError);
+        if (!pdf.isEmpty()) {
+            const int pdfPages = PdfPageRenderer::pageCount(pdf);
+            if (pdfPages > 0) {
+                DocxFileCache cache;
+                cache.pdfPath = pdf;
+                cache.pageCount = pdfPages;
+                cache.valid = true;
+
+                const QString ext = QFileInfo(path).suffix().toLower();
+                if (ext == QLatin1String("docx") || ext == QLatin1String("docm")) {
+                    const DocxFileCache textCache = DocxRenderer::open(path);
+                    cache.plainText = textCache.plainText;
+                    cache.pageTexts = textCache.pageTexts;
+                    cache.html = textCache.html;
+                    cache.pageW = textCache.pageW;
+                    cache.pageH = textCache.pageH;
+                }
+                return cache;
+            }
+        }
+    }
+
+    return DocxRenderer::open(path);
+}
+
+void DocumentLoader::primeDocxCaches(const QStringList &paths, QHash<QString, DocxFileCache> *out)
+{
+    if (!out)
+        return;
+
+    for (const QString &path : paths) {
+        if (!OfficeConverter::isWordDocument(path))
+            continue;
+
+        const auto existing = out->constFind(path);
+        if (existing != out->cend() && !existing->pdfPath.isEmpty())
+            continue;
+
+        out->insert(path, buildDocxCacheEntry(path));
+    }
+}
 
 QVector<PageSlot> DocumentLoader::buildManifest(const QStringList &paths,
                                                 QHash<QString, DocxFileCache> *docxCacheOut)
@@ -76,19 +125,12 @@ QVector<PageSlot> DocumentLoader::buildManifest(const QStringList &paths,
         }
 
         if (kind == PageSlot::Docx) {
-            DocxFileCache cache = DocxRenderer::open(path);
-            if (OfficeConverter::available()) {
-                QString convertError;
-                const QString pdf = OfficeConverter::toPdfCached(path, &convertError);
-                if (!pdf.isEmpty()) {
-                    const int pdfPages = PdfPageRenderer::pageCount(pdf);
-                    if (pdfPages > 0) {
-                        cache.pdfPath = pdf;
-                        cache.pageCount = pdfPages;
-                        cache.valid = true;
-                    }
-                }
-            }
+            DocxFileCache cache;
+            if (docxCacheOut && docxCacheOut->contains(path))
+                cache = docxCacheOut->value(path);
+            else
+                cache = DocxRenderer::open(path);
+
             if (docxCacheOut)
                 docxCacheOut->insert(path, cache);
             const int count = cache.valid ? qMax(1, cache.pageCount) : 0;
@@ -268,19 +310,7 @@ QVector<PageContent> DocumentLoader::loadImage(const QString &path)
 
 QVector<PageContent> DocumentLoader::loadDocx(const QString &path)
 {
-    DocxFileCache cache = DocxRenderer::open(path);
-    if (OfficeConverter::available()) {
-        QString convertError;
-        const QString pdf = OfficeConverter::toPdfCached(path, &convertError);
-        if (!pdf.isEmpty()) {
-            const int pdfPages = PdfPageRenderer::pageCount(pdf);
-            if (pdfPages > 0) {
-                cache.pdfPath = pdf;
-                cache.pageCount = pdfPages;
-                cache.valid = true;
-            }
-        }
-    }
+    const DocxFileCache cache = buildDocxCacheEntry(path);
 
     QVector<PageContent> pages;
     const int count = !cache.pdfPath.isEmpty()
@@ -307,11 +337,12 @@ QVector<PageContent> DocumentLoader::loadFiles(const QStringList &paths,
                                                const ProgressFn &progress,
                                                bool enableOcr)
 {
-    const QVector<PageSlot> pageSlots = buildManifest(paths);
+    QHash<QString, DocxFileCache> docxCache;
+    primeDocxCaches(paths, &docxCache);
+    const QVector<PageSlot> pageSlots = buildManifest(paths, &docxCache);
     QVector<PageContent> all;
     all.reserve(pageSlots.size());
 
-    QHash<QString, DocxFileCache> docxCache;
     for (int i = 0; i < pageSlots.size(); ++i) {
         all.push_back(loadSlot(pageSlots.at(i), &docxCache));
         if (progress) {

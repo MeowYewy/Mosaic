@@ -347,6 +347,7 @@ void AppController::reorderPreviewToMatchFileList()
 
     const QStringList paths = m_files->paths();
     QHash<QString, DocxFileCache> cacheCopy = m_docxCache;
+    DocumentLoader::primeDocxCaches(paths, &cacheCopy);
     const QVector<PageSlot> newSlots = DocumentLoader::buildManifest(paths, &cacheCopy);
     if (newSlots.size() != m_pageSlots.size())
         return;
@@ -886,6 +887,9 @@ void AppController::loadPreview()
     m_progress = 0.02;
     emit progressChanged();
 
+    QHash<QString, DocxFileCache> primedDocxCache;
+    DocumentLoader::primeDocxCaches(paths, &primedDocxCache);
+
     auto *manifestWatcher = new QFutureWatcher<ManifestResult>(this);
     connect(manifestWatcher, &QFutureWatcher<ManifestResult>::finished, this,
             [this, manifestWatcher, generation]() {
@@ -930,8 +934,9 @@ void AppController::loadPreview()
                 schedulePageLoad(initial, true);
             });
 
-    manifestWatcher->setFuture(QtConcurrent::run([paths]() {
+    manifestWatcher->setFuture(QtConcurrent::run([paths, primedDocxCache]() {
         ManifestResult result;
+        result.docxCache = primedDocxCache;
         result.pageSlots = DocumentLoader::buildManifest(paths, &result.docxCache);
         return result;
     }));

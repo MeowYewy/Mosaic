@@ -4,7 +4,7 @@ setlocal EnableDelayedExpansion
 set "PROJECT_ROOT=%~dp0.."
 for %%I in ("%PROJECT_ROOT%") do set "PROJECT_ROOT=%%~fI"
 
-set "APP_VERSION=0.1.0"
+set "APP_VERSION=0.1.1"
 if exist "%PROJECT_ROOT%\APP_VERSION.txt" (
     for /f "usebackq delims=" %%V in ("%PROJECT_ROOT%\APP_VERSION.txt") do set "APP_VERSION=%%V"
 )

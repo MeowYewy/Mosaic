@@ -9,6 +9,7 @@
 
 class QNetworkAccessManager;
 class QNetworkReply;
+class QTimer;
 
 class UpdateChecker : public QObject
 {
@@ -83,6 +84,7 @@ private:
     void abortAllNetworkReplies();
     void abortReply(QNetworkReply *reply);
     void quitForInstaller();
+    void simulateUpdatePreview();
     static QStringList expandDownloadMirrors(const QStringList &urls, const QString &version);
     static bool looksLikeWindowsInstaller(const QString &path);
     static int compareVersions(const QString &lhs, const QString &rhs);
@@ -106,4 +108,5 @@ private:
     QVariantList m_changelog;
     QList<QNetworkReply *> m_replies;
     QStringList m_manifestUrls;
+    QTimer *m_periodicCheckTimer = nullptr;
 };

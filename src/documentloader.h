@@ -33,6 +33,12 @@ public:
 
     static QVector<PageSlot> buildManifest(const QStringList &paths,
                                            QHash<QString, DocxFileCache> *docxCacheOut = nullptr);
+
+    // Word COM/LibreOffice conversion must run on the main thread. Call before
+    // buildManifest from a worker thread so DOCX previews keep document layout.
+    static void primeDocxCaches(const QStringList &paths, QHash<QString, DocxFileCache> *out);
+    static DocxFileCache buildDocxCacheEntry(const QString &path);
+
     PageContent loadSlot(const PageSlot &slot, QHash<QString, DocxFileCache> *docxCache = nullptr);
 
     // enableOcr: off by default for fast preview; diag / future auto-mode can turn on.

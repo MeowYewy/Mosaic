@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.1.1",
+    "date": "2026-07-20",
+    "notes": {
+      "zh_CN": "优化了更新逻辑。",
+      "en": "Improved update check and download logic."
+    }
+  },
+  {
     "version": "0.1.0",
     "date": "2026-07-19",
     "notes": {

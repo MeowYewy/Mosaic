@@ -1,6 +1,6 @@
 {
-  "version": "0.1.0",
-  "downloadUrl": "https://github.com/MeowYewy/Mosaic/releases/download/v0.1.0/Mosaic_0.1.0_win64_Setup.exe",
+  "version": "0.1.1",
+  "downloadUrl": "https://github.com/MeowYewy/Mosaic/releases/download/v0.1.1/Mosaic_0.1.1_win64_Setup.exe",
   "silentInstallArgs": "/SILENT /SUPPRESSMSGBOXES /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS",
-  "releaseNotes": "Mosaic v0.1.0 — 本地文档工具箱与脱敏。"
+  "releaseNotes": "优化了更新逻辑。"
 }
