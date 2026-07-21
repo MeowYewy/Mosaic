@@ -1,16 +1,39 @@
 #include "redactionmodel.h"
 
+#include <QFileInfo>
+
 RedactionModel::RedactionModel(QObject *parent)
     : QAbstractListModel(parent)
 {
 }
 
+namespace {
+
+QString normalizedFilePath(const QString &path)
+{
+    return path.isEmpty() ? QString{} : QFileInfo(path).absoluteFilePath();
+}
+
+bool sameFilePath(const QString &a, const QString &b)
+{
+    if (a.isEmpty() || b.isEmpty())
+        return false;
+    return normalizedFilePath(a).compare(normalizedFilePath(b), Qt::CaseInsensitive) == 0;
+}
+
+} // namespace
+
 QVector<int> RedactionModel::visibleIndices() const
 {
     QVector<int> idxs;
     for (int i = 0; i < m_regions.size(); ++i) {
-        if (m_regions.at(i).pageIndex == m_pageFilter)
+        const auto &r = m_regions.at(i);
+        if (r.source == QLatin1String("fixed")) {
+            if (sameFilePath(r.filePath, m_pageFilePath))
+                idxs.push_back(i);
+        } else if (r.pageIndex == m_pageFilter) {
             idxs.push_back(i);
+        }
     }
     return idxs;
 }
@@ -79,23 +102,30 @@ void RedactionModel::setSelectedId(int id)
     }
 }
 
-void RedactionModel::setPageFilter(int page)
+void RedactionModel::setPageFilter(int page, const QString &filePath)
 {
-    if (m_pageFilter == page)
+    const bool samePage = m_pageFilter == page;
+    const bool samePath = m_pageFilePath == filePath;
+    if (samePage && samePath)
         return;
     beginResetModel();
     m_pageFilter = page;
+    m_pageFilePath = filePath;
     endResetModel();
     emit pageFilterChanged();
     emit countChanged();
 }
 
-QVector<RedactionRegion> RedactionModel::regionsForPage(int page) const
+QVector<RedactionRegion> RedactionModel::regionsForPage(int page, const QString &filePath) const
 {
     QVector<RedactionRegion> out;
     for (const auto &r : m_regions) {
-        if (r.pageIndex == page)
+        if (r.source == QLatin1String("fixed")) {
+            if (sameFilePath(r.filePath, filePath))
+                out.push_back(r);
+        } else if (r.pageIndex == page) {
             out.push_back(r);
+        }
     }
     return out;
 }
@@ -105,7 +135,7 @@ void RedactionModel::replaceAutoRegions(const QVector<RedactionRegion> &autoRegi
     beginResetModel();
     QVector<RedactionRegion> kept;
     for (const auto &r : m_regions) {
-        if (r.source == QLatin1String("manual"))
+        if (r.source == QLatin1String("manual") || r.source == QLatin1String("fixed"))
             kept.push_back(r);
     }
     m_regions = kept;
@@ -126,6 +156,8 @@ void RedactionModel::remapPageIndices(const QHash<int, int> &mapping)
 
     bool changed = false;
     for (auto &region : m_regions) {
+        if (region.source == QLatin1String("fixed"))
+            continue;
         const auto it = mapping.constFind(region.pageIndex);
         if (it != mapping.constEnd() && it.value() != region.pageIndex) {
             region.pageIndex = it.value();
@@ -184,6 +216,42 @@ int RedactionModel::addManual(int pageIndex, qreal x, qreal y, qreal w, qreal h)
     return r.id;
 }
 
+int RedactionModel::addFixed(const QString &filePath, qreal x, qreal y, qreal w, qreal h)
+{
+    if (filePath.isEmpty())
+        return -1;
+    if (w < 0) {
+        x += w;
+        w = -w;
+    }
+    if (h < 0) {
+        y += h;
+        h = -h;
+    }
+    x = qBound(0.0, x, 1.0);
+    y = qBound(0.0, y, 1.0);
+    w = qBound(0.01, w, 1.0 - x);
+    h = qBound(0.01, h, 1.0 - y);
+
+    RedactionRegion r;
+    r.id = m_nextId++;
+    r.pageIndex = m_pageFilter;
+    r.rect = QRectF(x, y, w, h);
+    r.kind = QStringLiteral("fixed");
+    r.source = QStringLiteral("fixed");
+    r.filePath = normalizedFilePath(filePath);
+    r.label = QStringLiteral("固定");
+
+    beginResetModel();
+    m_regions.push_back(r);
+    endResetModel();
+    m_selectedId = r.id;
+    emit countChanged();
+    emit selectedIdChanged();
+    emit regionsChanged();
+    return r.id;
+}
+
 void RedactionModel::removeSelected()
 {
     if (m_selectedId < 0)
@@ -226,7 +294,8 @@ void RedactionModel::updateRect(int id, qreal x, qreal y, qreal w, qreal h)
     m_regions[idx].rect = QRectF(x, y, w, h);
     // Geometry-only: refresh list roles. Defer full mask bake to regionsChanged
     // consumers via a light emit — avoid beginResetModel thrash while dragging.
-    if (m_regions[idx].pageIndex == m_pageFilter) {
+    if (m_regions[idx].pageIndex == m_pageFilter
+        || m_regions[idx].source == QLatin1String("fixed")) {
         const auto vis = visibleIndices();
         for (int row = 0; row < vis.size(); ++row) {
             if (vis.at(row) == idx) {

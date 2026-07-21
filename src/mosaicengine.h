@@ -1,5 +1,6 @@
 #pragma once
 
+#include "documentloader.h"
 #include "redactionmodel.h"
 
 #include <QImage>
@@ -20,5 +21,6 @@ public:
                         const QColor &blockColor = QColor(32, 32, 32));
 
     static bool exportPages(const QVector<QImage> &pages,
-                            const QString &outputPath);
+                            const QString &outputPath,
+                            int dpi = DocumentLoader::kExportDpi);
 };

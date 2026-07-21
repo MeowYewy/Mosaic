@@ -7,11 +7,12 @@ Item {
     id: root
 
     property bool enableReorder: false
+    readonly property bool reorderAllowed: enableReorder && !PdfController.maskedPreview
     readonly property int rowHeight: 36
     readonly property int rowSpacing: 4
     readonly property int rowStride: rowHeight + rowSpacing
     readonly property int deleteBtnWidth: 24
-    readonly property int gripWidth: enableReorder ? 24 : 0
+    readonly property int gripWidth: reorderAllowed ? 24 : 0
 
     property int dragIndex: -1
     property int insertAt: 0
@@ -109,13 +110,14 @@ Item {
             RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: 4
-                anchors.rightMargin: root.enableReorder ? 2 : 6
+                anchors.rightMargin: root.reorderAllowed ? 2 : 6
                 spacing: 4
 
                 IconDeleteButton {
                     Layout.preferredWidth: root.deleteBtnWidth
                     Layout.preferredHeight: root.deleteBtnWidth
                     Layout.alignment: Qt.AlignVCenter
+                    visible: !PdfController.maskedPreview
                     onClicked: PdfController.removeFileAt(index)
                 }
 
@@ -146,7 +148,7 @@ Item {
                 }
 
                 DragGrip {
-                    visible: root.enableReorder
+                    visible: root.reorderAllowed
                     Layout.preferredWidth: root.gripWidth
                     Layout.alignment: Qt.AlignVCenter
                     lineOpacity: gripArea.pressed ? 0.7 : 0.35
@@ -157,7 +159,7 @@ Item {
                 id: selectArea
                 anchors.fill: parent
                 anchors.leftMargin: root.deleteBtnWidth + 8
-                anchors.rightMargin: root.enableReorder ? root.gripWidth + 4 : 0
+                anchors.rightMargin: root.reorderAllowed ? root.gripWidth + 4 : 0
                 cursorShape: Qt.PointingHandCursor
                 enabled: root.dragIndex < 0
                 onClicked: PdfController.selectPreviewFile(path)
@@ -165,7 +167,7 @@ Item {
 
             MouseArea {
                 id: gripArea
-                visible: root.enableReorder
+                visible: root.reorderAllowed
                 width: root.gripWidth + 4
                 height: parent.height
                 anchors.right: parent.right
@@ -208,7 +210,7 @@ Item {
         radius: 1
         color: Theme.accent
         opacity: 0.55
-        visible: root.enableReorder && root.dragIndex >= 0
+        visible: root.reorderAllowed && root.dragIndex >= 0
         y: root.insertAt * root.rowStride - fileList.contentY - 1
         z: 50
 
@@ -225,7 +227,7 @@ Item {
         color: Theme.surface
         border.color: Theme.accent
         border.width: 1
-        visible: root.enableReorder && root.dragIndex >= 0
+        visible: root.reorderAllowed && root.dragIndex >= 0
         y: root.dragPointerY - height / 2
         z: 100
 
@@ -241,7 +243,7 @@ Item {
         RowLayout {
             anchors.fill: parent
             anchors.leftMargin: 4
-            anchors.rightMargin: root.enableReorder ? 2 : 6
+            anchors.rightMargin: root.reorderAllowed ? 2 : 6
             spacing: 4
 
             Item { Layout.preferredWidth: root.deleteBtnWidth }
@@ -256,7 +258,7 @@ Item {
             }
 
             Item {
-                visible: root.enableReorder
+                visible: root.reorderAllowed
                 Layout.preferredWidth: root.gripWidth
             }
         }

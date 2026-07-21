@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableDelayedExpansion
 cd /d "%~dp0.."
 call "%~dp0env.bat"
 if errorlevel 1 exit /b 1
@@ -59,20 +59,12 @@ if exist "%BUILD_DIR%\tools\poppler\pdftoppm.exe" (
     xcopy /E /I /Y /Q "%BUILD_DIR%\tools\poppler" "%DIST_DIR%\tools\poppler" >nul
 ) else if exist "%PROJECT_ROOT%\tools\poppler\pdftoppm.exe" (
     xcopy /E /I /Y /Q "%PROJECT_ROOT%\tools\poppler" "%DIST_DIR%\tools\poppler" >nul
-) else if exist "%PROJECT_ROOT%\..\PageCase\desktop-qt\tools\poppler\pdftoppm.exe" (
-    xcopy /E /I /Y /Q "%PROJECT_ROOT%\..\PageCase\desktop-qt\tools\poppler" "%DIST_DIR%\tools\poppler" >nul
 ) else if exist "%PROJECT_ROOT%\..\ProjectP\desktop-qt\tools\poppler\pdftoppm.exe" (
     xcopy /E /I /Y /Q "%PROJECT_ROOT%\..\ProjectP\desktop-qt\tools\poppler" "%DIST_DIR%\tools\poppler" >nul
+) else if exist "D:\TechG\ProjectP\desktop-qt\tools\poppler\pdftoppm.exe" (
+    xcopy /E /I /Y /Q "D:\TechG\ProjectP\desktop-qt\tools\poppler" "%DIST_DIR%\tools\poppler" >nul
 ) else (
     echo WARNING: tools\poppler not found - PDF preview may fail.
-)
-
-if exist "%PROJECT_ROOT%\tools\qpdf\qpdf.exe" (
-    xcopy /E /I /Y /Q "%PROJECT_ROOT%\tools\qpdf" "%DIST_DIR%\tools\qpdf" >nul
-) else if exist "%PROJECT_ROOT%\..\PageCase\desktop-qt\tools\qpdf\qpdf.exe" (
-    xcopy /E /I /Y /Q "%PROJECT_ROOT%\..\PageCase\desktop-qt\tools\qpdf" "%DIST_DIR%\tools\qpdf" >nul
-) else (
-    echo WARNING: tools\qpdf not found - merge/split/rotate may fail.
 )
 
 echo.

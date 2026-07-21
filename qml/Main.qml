@@ -30,16 +30,28 @@ ApplicationWindow {
     }
 
     function syncFilesToMask() {
-        AppController.replaceFiles(PdfController.filePaths)
+        const paths = PdfController.maskedPreview
+                      ? PdfController.sourceFilePaths
+                      : PdfController.filePaths
+        AppController.replaceFiles(paths)
     }
 
     function syncFilesToPdf() {
         PdfController.replaceFiles(AppController.filePaths)
     }
 
+    function finishMaskExit(anchorItem) {
+        if (AppSettings.modeTransition) {
+            themeTransition.startExit(anchorItem, null)
+        }
+        AppSettings.setMaskMode(false)
+    }
+
     function enterMaskMode() {
         if (AppSettings.maskMode || themeTransition.active)
             return
+        if (PdfController.maskedPreview)
+            PdfController.clearMaskedPreview()
         syncFilesToMask()
         if (AppSettings.modeTransition) {
             featureTabsRow.maskPinned = true
@@ -54,12 +66,13 @@ ApplicationWindow {
     function exitMaskMode(anchorItem) {
         if (!AppSettings.maskMode || themeTransition.active)
             return
-        syncFilesToPdf()
-        if (AppSettings.modeTransition) {
-            themeTransition.startExit(anchorItem, null)
-            AppSettings.setMaskMode(false)
+        const hasMarks = AppController.redactions.count > 0
+        finishMaskExit(anchorItem)
+        if (hasMarks) {
+            syncFilesToPdf()
+            Qt.callLater(AppController.prepareMaskedPdfForPdfTools)
         } else {
-            AppSettings.setMaskMode(false)
+            syncFilesToPdf()
         }
     }
 
@@ -95,7 +108,10 @@ ApplicationWindow {
             id: loadBarMask
             Layout.fillWidth: true
             Layout.preferredHeight: (AppSettings.maskMode
-                                     && (AppController.processing || AppController.backgroundLoading)) ? 3 : 0
+                                     && (AppController.backgroundLoading
+                                         || AppController.activeTask === "export"
+                                         || (AppController.processing
+                                             && AppController.activeTask.length === 0))) ? 3 : 0
             visible: Layout.preferredHeight > 0
             clip: true
             Rectangle { anchors.fill: parent; color: Theme.dark ? "#1A3D38" : "#D1EAE5" }
@@ -183,6 +199,16 @@ ApplicationWindow {
         function onActionFinished(ok, message) {
             if (AppSettings.maskMode)
                 statusToast.show(message, ok)
+        }
+        function onMaskedPdfPathsReady(ok, paths, readOnlyPreview) {
+            if (ok && paths.length > 0) {
+                if (readOnlyPreview)
+                    PdfController.applyMaskedPreview(paths, AppController.filePaths)
+                else
+                    syncFilesToPdf()
+            } else {
+                syncFilesToPdf()
+            }
         }
     }
 

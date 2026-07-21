@@ -322,7 +322,7 @@ QString PdfEngine::normalizePageRange(const QString &raw, bool *ok)
     if (ok)
         *ok = true;
 
-    QString text = raw;
+    QString text = raw.trimmed();
     text.remove(QLatin1Char(' '));
     text.remove(QChar(0x3000)); // full-width space
     text.replace(QChar(0xFF0C), QLatin1Char(',')); // ，
@@ -332,6 +332,25 @@ QString PdfEngine::normalizePageRange(const QString &raw, bool *ok)
     text.replace(QChar(0x2014), QLatin1Char('-')); // —
     text.replace(QChar(0xFF5E), QLatin1Char('-')); // ～
     text.replace(QLatin1Char('~'), QLatin1Char('-'));
+    text.replace(QChar(0xFF1B), QLatin1Char(',')); // ；
+    text.replace(QLatin1Char(';'), QLatin1Char(','));
+
+    QString normalized;
+    normalized.reserve(text.size());
+    for (const QChar &ch : text) {
+        if (ch.unicode() >= 0xFF10 && ch.unicode() <= 0xFF19)
+            normalized.append(QChar(QLatin1Char('0').unicode() + (ch.unicode() - 0xFF10)));
+        else
+            normalized.append(ch);
+    }
+    text = normalized;
+
+    while (!text.isEmpty()
+           && (text.endsWith(QLatin1Char(',')) || text.endsWith(QLatin1Char('-'))))
+        text.chop(1);
+    while (!text.isEmpty()
+           && (text.startsWith(QLatin1Char(',')) || text.startsWith(QLatin1Char('-'))))
+        text.remove(0, 1);
 
     if (text.isEmpty())
         return {};
@@ -458,7 +477,7 @@ QString PdfEngine::splitPdf(const QString &input, const QString &outputDir, bool
                 return QStringLiteral("Cannot overwrite output");
 
             QStringList args;
-            args << input << QStringLiteral("--pages") << input
+            args << input << QStringLiteral("--pages") << QStringLiteral(".")
                  << QString::number(pageNumber) << QStringLiteral("--") << out;
 
             QString err;

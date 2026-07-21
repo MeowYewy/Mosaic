@@ -2,7 +2,7 @@
 ; Build: scripts\package-installer.bat  or  release.bat
 
 #ifndef AppVersion
-  #define AppVersion "0.1.1"
+  #define AppVersion "0.1.2"
 #endif
 
 #ifndef SourceDir
@@ -56,7 +56,7 @@ Name: "{group}\{cm:UninstallProgram,Mosaic}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Mosaic"; Filename: "{app}\Mosaic.exe"; IconFilename: "{app}\Mosaic.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\Mosaic.exe"; Description: "{cm:LaunchProgram,Mosaic}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Mosaic.exe"; Description: "{cm:LaunchProgram,Mosaic}"; Flags: nowait postinstall
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"

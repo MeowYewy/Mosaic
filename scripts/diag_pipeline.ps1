@@ -1,12 +1,12 @@
-# Quick offline diagnostic for Mosaic load/OCR/PII pipeline.
+# Quick offline diagnostic for Mask Studio load/OCR/PII pipeline.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $build = Join-Path $root 'build'
 $tess = Join-Path $build 'tools\tesseract\tesseract.exe'
 $tessdata = Join-Path $build 'tools\tesseract\tessdata'
-$exe = Join-Path $build 'Mosaic.exe'
+$exe = Join-Path $build 'MaskStudio.exe'
 
-Write-Host '=== Mosaic pipeline diagnostic ==='
+Write-Host '=== Mask Studio pipeline diagnostic ==='
 Write-Host "build exe: $(Test-Path $exe) $exe"
 Write-Host "tesseract: $(Test-Path $tess) $tess"
 Write-Host "chi_sim:   $(Test-Path (Join-Path $tessdata 'chi_sim.traineddata'))"

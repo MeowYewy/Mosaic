@@ -8,6 +8,7 @@ RowLayout {
     spacing: 6
 
     readonly property bool masked: AppController.showMaskedPreview
+    readonly property bool exportBusy: AppController.activeTask === "export"
     property bool deletePulse: false
 
     Timer {
@@ -59,7 +60,7 @@ RowLayout {
         ToolStripButton {
             iconName: "expand"
             label: Theme.tr("toolFitView")
-            enabled: AppController.hasPreview
+            enabled: AppController.hasPreview && !bar.exportBusy
             onClicked: AppController.resetPreviewView()
         }
     }
@@ -67,7 +68,7 @@ RowLayout {
     Divider {}
 
     GroupBox_ {
-        enabled: !bar.masked
+        enabled: !bar.masked && !bar.exportBusy
         opacity: enabled ? 1 : 0.45
 
         ToolStripButton {
@@ -76,6 +77,13 @@ RowLayout {
             active: AppController.toolMode === "draw"
             enabled: parent.enabled
             onClicked: AppController.toolMode = "draw"
+        }
+        ToolStripButton {
+            iconName: "fixed"
+            label: Theme.tr("toolFixedDraw")
+            active: AppController.toolMode === "fixedDraw"
+            enabled: parent.enabled
+            onClicked: AppController.toolMode = "fixedDraw"
         }
         ToolStripButton {
             iconName: "select"

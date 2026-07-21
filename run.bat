@@ -8,11 +8,14 @@ set "RUNDIR=build"
 if not exist "build\Mosaic.exe" (
   if exist "build\release\Mosaic.exe" (
     set "RUNDIR=build\release"
+  ) else if exist "build\MaskStudio.exe" (
+    set "RUNEXE=MaskStudio.exe"
   ) else (
     echo Mosaic.exe not found. Run build.bat first.
     exit /b 1
   )
 )
+if not defined RUNEXE set "RUNEXE=Mosaic.exe"
 
 if not exist "%RUNDIR%\platforms\qwindows.dll" (
   echo Qt plugins missing — running deploy-dev.bat ...
@@ -20,6 +23,6 @@ if not exist "%RUNDIR%\platforms\qwindows.dll" (
   if errorlevel 1 exit /b 1
 )
 
-echo Starting: %RUNDIR%\Mosaic.exe
-start "" "%RUNDIR%\Mosaic.exe"
+echo Starting: %RUNDIR%\%RUNEXE%
+start "" "%RUNDIR%\%RUNEXE%"
 endlocal

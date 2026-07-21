@@ -14,6 +14,7 @@
 #include <QProcess>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QTimer>
 #include <QUrl>
@@ -65,6 +66,36 @@ QString normalizeVersionTag(const QString &version)
     if (v.startsWith(QLatin1Char('v'), Qt::CaseInsensitive))
         v = v.mid(1);
     return v;
+}
+
+QString mosaicInstalledExe()
+{
+    const QString appId =
+        QStringLiteral("{B7E4A2C1-9D3F-4E8A-B6C5-1F0E2D3A4B5C}_is1");
+    const QStringList regPaths = {
+        QStringLiteral("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\")
+            + appId,
+        QStringLiteral("HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\")
+            + appId,
+    };
+
+    for (const QString &regPath : regPaths) {
+        QSettings reg(regPath, QSettings::NativeFormat);
+        const QString loc = reg.value(QStringLiteral("InstallLocation")).toString();
+        if (loc.isEmpty())
+            continue;
+        const QString exe = QDir(loc).filePath(QStringLiteral("Mosaic.exe"));
+        if (QFile::exists(exe))
+            return QDir::toNativeSeparators(exe);
+    }
+
+    const QString pf = qEnvironmentVariable("ProgramFiles");
+    if (!pf.isEmpty()) {
+        const QString exe = QDir(pf).filePath(QStringLiteral("Mosaic/Mosaic.exe"));
+        if (QFile::exists(exe))
+            return QDir::toNativeSeparators(exe);
+    }
+    return {};
 }
 
 } // namespace
@@ -404,6 +435,8 @@ void UpdateChecker::downloadUpdate()
 {
     if (m_installLaunched)
         return;
+    if (m_status == Checking || m_status == Downloading)
+        return;
     if (m_status == ReadyToInstall) {
         installUpdate();
         return;
@@ -678,19 +711,32 @@ void UpdateChecker::installUpdate()
                            : m_silentInstallArgs;
     if (!argsLine.contains(QStringLiteral("/CLOSEAPPLICATIONS"), Qt::CaseInsensitive))
         argsLine += QStringLiteral(" /CLOSEAPPLICATIONS");
-    if (!argsLine.contains(QStringLiteral("/RESTARTAPPLICATIONS"), Qt::CaseInsensitive))
-        argsLine += QStringLiteral(" /RESTARTAPPLICATIONS");
+    if (!argsLine.contains(QStringLiteral("/NORESTARTAPPLICATIONS"), Qt::CaseInsensitive))
+        argsLine += QStringLiteral(" /NORESTARTAPPLICATIONS");
 
-    const QStringList args = QProcess::splitCommand(argsLine);
+    const QString nativeInstaller = QDir::toNativeSeparators(m_installerPath);
+    QString batch =
+        QStringLiteral("start \"\" /wait \"%1\" %2").arg(nativeInstaller, argsLine.trimmed());
+
+    const QString exePath = mosaicInstalledExe();
+    if (!exePath.isEmpty())
+        batch += QStringLiteral(" && start \"\" \"%1\"").arg(exePath);
 
     qint64 pid = 0;
-    const bool started = QProcess::startDetached(m_installerPath, args, QString(), &pid);
+    bool started = QProcess::startDetached(QStringLiteral("cmd.exe"),
+                                           {QStringLiteral("/c"), batch},
+                                           QString(),
+                                           &pid);
     if (!started || pid <= 0) {
-        pid = 0;
-        if (!QProcess::startDetached(m_installerPath, QStringList(), QString(), &pid) || pid <= 0) {
-            setStatus(DownloadFailed);
-            return;
+        const QStringList args = QProcess::splitCommand(argsLine);
+        started = QProcess::startDetached(m_installerPath, args, QString(), &pid);
+        if (!started || pid <= 0) {
+            started = QProcess::startDetached(m_installerPath, QStringList(), QString(), &pid);
         }
+    }
+    if (!started || pid <= 0) {
+        setStatus(DownloadFailed);
+        return;
     }
 
     m_installLaunched = true;

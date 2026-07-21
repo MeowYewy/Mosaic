@@ -5,16 +5,53 @@
 #include "filepicker.h"
 #include "mosaicengine.h"
 #include "previewimageprovider.h"
+#include "pdfpagerenderer.h"
 
+#include <QDir>
 #include <QEventLoop>
 #include <QFileInfo>
 #include <QFutureWatcher>
+#include <QMetaType>
 #include <QPointer>
+#include <QSet>
 #include <QUrl>
 #include <QtConcurrent>
 #include <QStandardPaths>
+#include <QTimer>
+#include <algorithm>
+#include <functional>
+
+struct MaskedPdfBuildInput {
+    QVector<PageSlot> pageSlots;
+    QHash<QString, DocxFileCache> docxCache;
+    QVector<RedactionRegion> regions;
+    int mosaicStyle = 0;
+    QStringList sourcePaths;
+};
+
+struct MaskedPdfBuildResult {
+    bool ok = false;
+    QStringList paths;
+    bool readOnlyPreview = false;
+};
+
+Q_DECLARE_METATYPE(MaskedPdfBuildResult)
+
+using TaskProgressFn = std::function<void(int done, int total)>;
 
 namespace {
+
+QString normalizedFilePath(const QString &path)
+{
+    return path.isEmpty() ? QString{} : QFileInfo(path).absoluteFilePath();
+}
+
+bool sameFilePath(const QString &a, const QString &b)
+{
+    if (a.isEmpty() || b.isEmpty())
+        return false;
+    return normalizedFilePath(a).compare(normalizedFilePath(b), Qt::CaseInsensitive) == 0;
+}
 
 QString variantToLocalPath(const QVariant &value)
 {
@@ -66,16 +103,358 @@ LoadedPageBatch toLoadedBatch(const PageBatchInput &input,
     return batch;
 }
 
-QVector<QPair<int, PageContent>> loadPageBatch(const PageBatchInput &input)
+struct ExportJobInput {
+    QVector<PageSlot> pageSlots;
+    QHash<QString, DocxFileCache> docxCache;
+    QVector<RedactionRegion> regions;
+    int mosaicStyle = 0;
+    int pageCount = 0;
+    QString outputPath;
+};
+
+QVector<RedactionRegion> regionsForExportPage(int page, const QString &filePath,
+                                              const QVector<RedactionRegion> &regions)
+{
+    QVector<RedactionRegion> out;
+    for (const auto &r : regions) {
+        if (r.source == QLatin1String("fixed")) {
+            if (sameFilePath(r.filePath, filePath))
+                out.push_back(r);
+        } else if (r.pageIndex == page) {
+            out.push_back(r);
+        }
+    }
+    return out;
+}
+
+bool runExportJob(const ExportJobInput &input, const TaskProgressFn &onProgress = {})
 {
     DocumentLoader loader;
     QHash<QString, DocxFileCache> docxCache = input.docxCache;
+    const auto style = input.mosaicStyle == 1 ? MosaicEngine::Pixelate : MosaicEngine::SolidBlock;
+    const int dpi = DocumentLoader::kExportDpi;
+
+    QVector<QImage> pages;
+    pages.resize(input.pageCount);
+
+    QHash<QString, QList<int>> pdfGroups;
+    QList<int> otherIndices;
+    for (int i = 0; i < input.pageCount; ++i) {
+        if (i >= input.pageSlots.size()) {
+            if (onProgress)
+                onProgress(i + 1, input.pageCount);
+            continue;
+        }
+        if (input.pageSlots.at(i).kind == PageSlot::Pdf)
+            pdfGroups[input.pageSlots.at(i).path].append(i);
+        else
+            otherIndices.append(i);
+    }
+
+    int completed = 0;
+    const int total = input.pageCount;
+    const auto report = [&]() {
+        ++completed;
+        if (onProgress)
+            onProgress(completed, total);
+    };
+
+    for (auto it = pdfGroups.cbegin(); it != pdfGroups.cend(); ++it) {
+        QList<int> indices = it.value();
+        std::sort(indices.begin(), indices.end(), [&](int a, int b) {
+            return input.pageSlots.at(a).indexInFile < input.pageSlots.at(b).indexInFile;
+        });
+
+        int runStart = 0;
+        while (runStart < indices.size()) {
+            int runEnd = runStart;
+            while (runEnd + 1 < indices.size()) {
+                const int cur = input.pageSlots.at(indices.at(runEnd)).indexInFile;
+                const int nxt = input.pageSlots.at(indices.at(runEnd + 1)).indexInFile;
+                if (nxt == cur + 1)
+                    ++runEnd;
+                else
+                    break;
+            }
+
+            const int firstPage = input.pageSlots.at(indices.at(runStart)).indexInFile + 1;
+            const int lastPage = input.pageSlots.at(indices.at(runEnd)).indexInFile + 1;
+            const QVector<QImage> rendered =
+                PdfPageRenderer::renderPages(it.key(), firstPage, lastPage, dpi);
+            const int baseIndexInFile = input.pageSlots.at(indices.at(runStart)).indexInFile;
+
+            for (int j = 0; j <= runEnd - runStart; ++j) {
+                const int pageIdx = indices.at(runStart + j);
+                const PageSlot &slot = input.pageSlots.at(pageIdx);
+                QImage img;
+                const int renderIdx = slot.indexInFile - baseIndexInFile;
+                if (renderIdx >= 0 && renderIdx < rendered.size())
+                    img = rendered.at(renderIdx);
+                if (img.isNull())
+                    img = PdfPageRenderer::renderPage(it.key(), slot.indexInFile + 1, dpi);
+                if (img.isNull()) {
+                    const PageContent pc = loader.loadSlot(slot, &docxCache, dpi);
+                    img = pc.image;
+                }
+                if (!img.isNull()) {
+                    pages[pageIdx] = MosaicEngine::apply(
+                        img, regionsForExportPage(pageIdx, slot.path, input.regions), style);
+                }
+                report();
+            }
+            runStart = runEnd + 1;
+        }
+    }
+
+    for (int i : otherIndices) {
+        const PageContent pc =
+            loader.loadSlot(input.pageSlots.at(i), &docxCache, dpi);
+        if (!pc.image.isNull()) {
+            const QString filePath = input.pageSlots.at(i).path;
+            pages[i] = MosaicEngine::apply(
+                pc.image, regionsForExportPage(i, filePath, input.regions), style);
+        }
+        report();
+    }
+
+    for (int i = 0; i < input.pageCount; ++i) {
+        if (!pages.at(i).isNull() || i >= input.pageSlots.size())
+            continue;
+        const PageSlot &slot = input.pageSlots.at(i);
+        const PageContent pc = loader.loadSlot(slot, &docxCache, dpi);
+        if (!pc.image.isNull()) {
+            pages[i] = MosaicEngine::apply(
+                pc.image, regionsForExportPage(i, slot.path, input.regions), style);
+        }
+    }
+
+    return MosaicEngine::exportPages(pages, input.outputPath, dpi);
+}
+
+struct MaskedPdfCacheInput {
+    QVector<PageSlot> pageSlots;
+    QVector<QImage> rawPages;
+    QVector<QImage> maskedPages;
+    QVector<RedactionRegion> regions;
+    int mosaicStyle = 0;
+    QStringList sourcePaths;
+    QHash<QString, DocxFileCache> docxCache;
+};
+
+MaskedPdfBuildResult runMaskedPdfBuildFromCache(const MaskedPdfCacheInput &input)
+{
+    MaskedPdfBuildResult result;
+    if (input.sourcePaths.isEmpty())
+        return result;
+
+    if (input.regions.isEmpty()) {
+        result.ok = true;
+        result.paths = input.sourcePaths;
+        result.readOnlyPreview = false;
+        return result;
+    }
+
+    const auto style = input.mosaicStyle == 1 ? MosaicEngine::Pixelate : MosaicEngine::SolidBlock;
+    const QString cacheRoot =
+        QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/masked_pdf");
+    QDir().mkpath(cacheRoot);
+
+    DocumentLoader loader;
+    QHash<QString, DocxFileCache> docxCache = input.docxCache;
+
+    result.paths.reserve(input.sourcePaths.size());
+    bool anyWritten = false;
+
+    for (const QString &filePath : input.sourcePaths) {
+        QVector<QImage> pages;
+        for (int i = 0; i < input.pageSlots.size(); ++i) {
+            if (!sameFilePath(input.pageSlots.at(i).path, filePath))
+                continue;
+
+            QImage page;
+            if (i < input.maskedPages.size() && !input.maskedPages.at(i).isNull()) {
+                page = input.maskedPages.at(i);
+            } else if (i < input.rawPages.size() && !input.rawPages.at(i).isNull()) {
+                page = MosaicEngine::apply(
+                    input.rawPages.at(i), regionsForExportPage(i, filePath, input.regions), style);
+            } else {
+                const PageContent pc =
+                    loader.loadSlot(input.pageSlots.at(i), &docxCache, DocumentLoader::kPreviewDpi);
+                if (!pc.image.isNull()) {
+                    page = MosaicEngine::apply(
+                        pc.image, regionsForExportPage(i, filePath, input.regions), style);
+                }
+            }
+            if (!page.isNull())
+                pages.push_back(page);
+        }
+
+        if (pages.isEmpty()) {
+            result.paths.append(filePath);
+            continue;
+        }
+
+        const QFileInfo info(filePath);
+        const QString dest = cacheRoot + QLatin1Char('/')
+                             + info.completeBaseName() + QStringLiteral("_")
+                             + QString::number(qHash(filePath), 16) + QStringLiteral("_masked.pdf");
+        if (MosaicEngine::exportPages(pages, dest, DocumentLoader::kPreviewDpi)) {
+            result.paths.append(dest);
+            anyWritten = true;
+        } else {
+            result.paths.append(filePath);
+        }
+    }
+
+    result.ok = !result.paths.isEmpty();
+    result.readOnlyPreview = anyWritten;
+    return result;
+}
+
+void ensureMaskedPagesFilled(MaskedPdfCacheInput &input)
+{
+    const auto style = input.mosaicStyle == 1 ? MosaicEngine::Pixelate : MosaicEngine::SolidBlock;
+    const int pageCount = input.pageSlots.size();
+    if (input.maskedPages.size() < pageCount)
+        input.maskedPages.resize(pageCount);
+
+    for (int i = 0; i < pageCount; ++i) {
+        if (i < input.maskedPages.size() && !input.maskedPages.at(i).isNull())
+            continue;
+        if (i >= input.rawPages.size() || input.rawPages.at(i).isNull())
+            continue;
+        const QString filePath = input.pageSlots.at(i).path;
+        input.maskedPages[i] = MosaicEngine::apply(
+            input.rawPages.at(i), regionsForExportPage(i, filePath, input.regions), style);
+    }
+}
+
+MaskedPdfBuildResult runMaskedPdfBuildJob(const MaskedPdfBuildInput &input,
+                                          const TaskProgressFn &onProgress = {})
+{
+    MaskedPdfBuildResult result;
+    if (input.sourcePaths.isEmpty())
+        return result;
+
+    if (input.regions.isEmpty()) {
+        result.ok = true;
+        result.paths = input.sourcePaths;
+        result.readOnlyPreview = false;
+        return result;
+    }
+
+    DocumentLoader loader;
+    QHash<QString, DocxFileCache> docxCache = input.docxCache;
+    const auto style = input.mosaicStyle == 1 ? MosaicEngine::Pixelate : MosaicEngine::SolidBlock;
+    const QString cacheRoot =
+        QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/masked_pdf");
+    QDir().mkpath(cacheRoot);
+
+    result.paths.reserve(input.sourcePaths.size());
+    bool anyWritten = false;
+
+    for (const QString &filePath : input.sourcePaths) {
+        QVector<QImage> pages;
+        for (int i = 0; i < input.pageSlots.size(); ++i) {
+            if (!sameFilePath(input.pageSlots.at(i).path, filePath))
+                continue;
+            const PageContent pc =
+                loader.loadSlot(input.pageSlots.at(i), &docxCache, DocumentLoader::kExportDpi);
+            if (pc.image.isNull())
+                continue;
+            pages.push_back(MosaicEngine::apply(
+                pc.image, regionsForExportPage(i, filePath, input.regions), style));
+        }
+
+        if (pages.isEmpty()) {
+            result.paths.append(filePath);
+        } else {
+            const QFileInfo info(filePath);
+            const QString dest = cacheRoot + QLatin1Char('/')
+                                 + info.completeBaseName() + QStringLiteral("_")
+                                 + QString::number(qHash(filePath), 16) + QStringLiteral("_masked.pdf");
+            if (MosaicEngine::exportPages(pages, dest)) {
+                result.paths.append(dest);
+                anyWritten = true;
+            } else {
+                result.paths.append(filePath);
+            }
+        }
+
+        if (onProgress)
+            onProgress(result.paths.size(), input.sourcePaths.size());
+    }
+
+    result.ok = !result.paths.isEmpty();
+    result.readOnlyPreview = anyWritten;
+    return result;
+}
+
+QVector<QPair<int, PageContent>> loadPageBatch(const PageBatchInput &input)
+{
+    QHash<QString, DocxFileCache> docxCache = input.docxCache;
     QVector<QPair<int, PageContent>> loaded;
     loaded.reserve(input.indices.size());
+
+    QHash<QString, QList<int>> pdfGroups;
     for (int idx : input.indices) {
         if (idx < 0 || idx >= input.pageSlots.size())
             continue;
-        loaded.push_back({idx, loader.loadSlot(input.pageSlots.at(idx), &docxCache)});
+        const PageSlot &slot = input.pageSlots.at(idx);
+        if (slot.kind == PageSlot::Pdf)
+            pdfGroups[slot.path].append(idx);
+    }
+
+    QSet<int> handled;
+    for (auto it = pdfGroups.cbegin(); it != pdfGroups.cend(); ++it) {
+        QList<int> indices = it.value();
+        std::sort(indices.begin(), indices.end(), [&](int a, int b) {
+            return input.pageSlots.at(a).indexInFile < input.pageSlots.at(b).indexInFile;
+        });
+
+        int runStart = 0;
+        while (runStart < indices.size()) {
+            int runEnd = runStart;
+            while (runEnd + 1 < indices.size()) {
+                const int cur = input.pageSlots.at(indices.at(runEnd)).indexInFile;
+                const int nxt = input.pageSlots.at(indices.at(runEnd + 1)).indexInFile;
+                if (nxt == cur + 1)
+                    ++runEnd;
+                else
+                    break;
+            }
+
+            const int page1 = input.pageSlots.at(indices.at(runStart)).indexInFile + 1;
+            const int pageN = input.pageSlots.at(indices.at(runEnd)).indexInFile + 1;
+            const QVector<QImage> imgs =
+                PdfPageRenderer::renderPages(it.key(), page1, pageN, DocumentLoader::kPreviewDpi);
+            const int baseIndexInFile = input.pageSlots.at(indices.at(runStart)).indexInFile;
+
+            for (int j = runStart; j <= runEnd; ++j) {
+                PageContent pc;
+                const int pageIdx = indices.at(j);
+                const PageSlot &slot = input.pageSlots.at(pageIdx);
+                const int renderIdx = slot.indexInFile - baseIndexInFile;
+                if (renderIdx >= 0 && renderIdx < imgs.size())
+                    pc.image = imgs.at(renderIdx);
+                if (pc.image.isNull())
+                    pc.image = PdfPageRenderer::renderPage(it.key(), slot.indexInFile + 1,
+                                                           DocumentLoader::kPreviewDpi);
+                loaded.push_back({pageIdx, pc});
+                handled.insert(pageIdx);
+            }
+            runStart = runEnd + 1;
+        }
+    }
+
+    DocumentLoader loader;
+    for (int idx : input.indices) {
+        if (handled.contains(idx))
+            continue;
+        if (idx < 0 || idx >= input.pageSlots.size())
+            continue;
+        loaded.push_back({idx, loader.loadSlot(input.pageSlots.at(idx), &docxCache,
+                                                 DocumentLoader::kPreviewDpi)});
     }
     return loaded;
 }
@@ -95,6 +474,7 @@ AppController::AppController(PreviewImageProvider *provider,
     , m_reloadTimer(new QTimer(this))
     , m_contentIndexTimer(new QTimer(this))
 {
+    qRegisterMetaType<MaskedPdfBuildResult>();
     m_reloadTimer->setSingleShot(true);
     m_reloadTimer->setInterval(120);
     connect(m_reloadTimer, &QTimer::timeout, this, &AppController::loadPreview);
@@ -107,7 +487,7 @@ AppController::AppController(PreviewImageProvider *provider,
     connect(m_files, &FileListModel::pathsChanged, this, &AppController::onFilePathsChanged);
     connect(m_redactions, &RedactionModel::regionsChanged, this, [this]() {
         if (m_showMaskedPreview)
-            rebuildMaskedPreview();
+            rebuildMaskedPreview(false);
     });
 }
 
@@ -131,15 +511,23 @@ void AppController::setCurrentPage(int page)
     if (page < 0 || page >= m_pageCount || page == m_currentPage)
         return;
     m_currentPage = page;
-    m_redactions->setPageFilter(page);
+    m_redactions->setPageFilter(page, pageFilePath(page));
     emit currentPageChanged();
+    emit previewLayoutChanged();
+    if (m_showMaskedPreview)
+        rebuildMaskedPreview(false);
     ensurePagesLoaded(page, qMin(m_pageCount - 1, page + 2));
 }
 
 QString AppController::previewFilePath() const
 {
-    if (m_currentPage >= 0 && m_currentPage < m_pageSlots.size())
-        return m_pageSlots.at(m_currentPage).path;
+    return pageFilePath(m_currentPage);
+}
+
+QString AppController::pageFilePath(int page) const
+{
+    if (page >= 0 && page < m_pageSlots.size())
+        return m_pageSlots.at(page).path;
     return {};
 }
 
@@ -172,7 +560,8 @@ void AppController::setMosaicStyle(int style)
         return;
     m_mosaicStyle = style;
     emit mosaicStyleChanged();
-    rebuildMaskedPreview();
+    if (m_showMaskedPreview)
+        rebuildMaskedPreview(false);
 }
 
 void AppController::setPreviewZoom(qreal zoom)
@@ -197,11 +586,32 @@ void AppController::setShowMaskedPreview(bool on)
     m_showMaskedPreview = on;
     emit showMaskedPreviewChanged();
     if (on) {
-        waitForAllPagesLoaded();
-        rebuildMaskedPreview();
+        rebuildMaskedPreview(false);
     } else {
         bumpPreviewToken();
     }
+}
+
+void AppController::setFileDialogOpen(bool on)
+{
+    if (m_fileDialogOpen == on)
+        return;
+    m_fileDialogOpen = on;
+    emit fileDialogOpenChanged();
+}
+
+int AppController::currentPageWidth() const
+{
+    if (m_currentPage < 0 || m_currentPage >= m_rawPages.size())
+        return 0;
+    return m_rawPages.at(m_currentPage).width();
+}
+
+int AppController::currentPageHeight() const
+{
+    if (m_currentPage < 0 || m_currentPage >= m_rawPages.size())
+        return 0;
+    return m_rawPages.at(m_currentPage).height();
 }
 
 void AppController::setProcessing(bool on)
@@ -212,6 +622,46 @@ void AppController::setProcessing(bool on)
     emit processingChanged();
     if (!on)
         tryScheduleContentIndex();
+}
+
+void AppController::beginTask(const QString &taskId, bool blockUi)
+{
+    m_activeTask = taskId;
+    m_progress = 0.04;
+    emit activeTaskChanged();
+    emit progressChanged();
+    if (blockUi)
+        setProcessing(true);
+}
+
+void AppController::endTask()
+{
+    m_activeTask.clear();
+    m_progress = 0;
+    emit activeTaskChanged();
+    emit progressChanged();
+    if (m_processing)
+        setProcessing(false);
+}
+
+void AppController::setTaskProgress(qreal value)
+{
+    const qreal clamped = qBound<qreal>(0.04, value, 1.0);
+    if (qFuzzyCompare(m_progress, clamped))
+        return;
+    m_progress = clamped;
+    emit progressChanged();
+}
+
+QString AppController::taskLabel() const
+{
+    if (!m_settings)
+        return {};
+    if (m_activeTask == QLatin1String("export"))
+        return m_settings->trKey(QStringLiteral("exporting"));
+    if (m_activeTask == QLatin1String("prepareMasked"))
+        return m_settings->trKey(QStringLiteral("preparingMaskedPreview"));
+    return m_settings->trKey(QStringLiteral("loadingPreview"));
 }
 
 void AppController::setBackgroundLoading(bool on)
@@ -246,15 +696,20 @@ QStringList AppController::pickPathsSync(const QString &mode,
                                          const QString &filter,
                                          const QString &exportKind)
 {
+    setFileDialogOpen(true);
     const QString startDir = defaultDialogDir();
+    QStringList result;
     if (m_settings && !m_settings->customFilePicker()) {
-        return FilePicker::pickNative(m_settings, mode, startDir, suggested, filter);
+        result = FilePicker::pickNative(m_settings, mode, startDir, suggested, filter);
+    } else if (!m_filePicker) {
+        result = {};
+    } else if (!m_filePicker->openSync(mode, startDir, suggested, filter, exportKind)) {
+        result = {};
+    } else {
+        result = m_filePicker->resultPaths();
     }
-    if (!m_filePicker)
-        return {};
-    if (!m_filePicker->openSync(mode, startDir, suggested, filter, exportKind))
-        return {};
-    return m_filePicker->resultPaths();
+    setFileDialogOpen(false);
+    return result;
 }
 
 void AppController::browseAndAddFiles()
@@ -396,7 +851,7 @@ void AppController::reorderPreviewToMatchFileList()
     }
     if (nextPage != m_currentPage) {
         m_currentPage = nextPage;
-        m_redactions->setPageFilter(nextPage);
+        m_redactions->setPageFilter(nextPage, pageFilePath(nextPage));
         emit currentPageChanged();
     }
 
@@ -636,29 +1091,40 @@ void AppController::deleteSelectedMark()
     emit deleteMarkPulse();
 }
 
-void AppController::rebuildMaskedPreview()
+void AppController::rebuildMaskedPreview(bool allPages)
 {
     if (m_rawPages.isEmpty() || !m_provider)
         return;
 
     const auto style = m_mosaicStyle == 1 ? MosaicEngine::Pixelate : MosaicEngine::SolidBlock;
-    QVector<QImage> masked;
-    masked.resize(m_rawPages.size());
-    for (int i = 0; i < m_rawPages.size(); ++i) {
-        if (m_rawPages.at(i).isNull())
-            continue;
+    QVector<QImage> masked = m_provider->maskedPages();
+    if (masked.size() != m_rawPages.size())
+        masked.resize(m_rawPages.size());
+
+    const auto rebuildAt = [&](int i) {
+        if (i < 0 || i >= m_rawPages.size() || m_rawPages.at(i).isNull())
+            return;
         masked[i] = MosaicEngine::apply(m_rawPages.at(i),
-                                          m_redactions->regionsForPage(i),
+                                          m_redactions->regionsForPage(i, pageFilePath(i)),
                                           style);
+    };
+
+    if (allPages) {
+        for (int i = 0; i < m_rawPages.size(); ++i)
+            rebuildAt(i);
+    } else {
+        rebuildAt(m_currentPage);
     }
+
     m_provider->setRawPages(m_rawPages);
     m_provider->setMaskedPages(masked);
     bumpPreviewToken();
+    emit previewLayoutChanged();
 }
 
 void AppController::refreshPreviewMasks()
 {
-    rebuildMaskedPreview();
+    rebuildMaskedPreview(true);
 }
 
 void AppController::applyLoadedBatch(const LoadedPageBatch &batch)
@@ -683,8 +1149,33 @@ void AppController::applyLoadedBatch(const LoadedPageBatch &batch)
             m_provider->setRawPageAt(idx, pc.image);
     }
 
-    if (!batch.pages.isEmpty())
+    if (m_provider)
+        m_provider->setRawPages(m_rawPages);
+
+    if (m_showMaskedPreview && m_provider && !batch.pages.isEmpty()) {
+        const auto style = m_mosaicStyle == 1 ? MosaicEngine::Pixelate : MosaicEngine::SolidBlock;
+        QVector<QImage> masked = m_provider->maskedPages();
+        if (masked.size() != m_pageCount)
+            masked.resize(m_pageCount);
+
+        for (const auto &entry : batch.pages) {
+            const int idx = entry.first;
+            if (idx < 0 || idx >= m_pageCount || idx >= m_rawPages.size()
+                || m_rawPages.at(idx).isNull()) {
+                continue;
+            }
+            masked[idx] = MosaicEngine::apply(
+                m_rawPages.at(idx),
+                m_redactions->regionsForPage(idx, pageFilePath(idx)),
+                style);
+        }
+        m_provider->setMaskedPages(masked);
+    }
+
+    if (!batch.pages.isEmpty()) {
         bumpPreviewToken();
+        emit previewLayoutChanged();
+    }
 
     updateLoadProgress();
 
@@ -904,7 +1395,7 @@ void AppController::loadPreview()
                 m_pageTexts = QVector<QString>(m_pageSlots.size());
                 m_pageCount = m_pageSlots.size();
                 m_currentPage = 0;
-                m_redactions->setPageFilter(0);
+                m_redactions->setPageFilter(0, pageFilePath(0));
                 m_redactions->replaceAutoRegions({});
                 m_autoMarkCount = 0;
                 emit autoMarkCountChanged();
@@ -944,10 +1435,12 @@ void AppController::loadPreview()
 
 void AppController::exportRedacted()
 {
-    if (m_pageCount <= 0 || !m_provider) {
+    if (m_pageCount <= 0) {
         emit actionFinished(false, m_settings->trKey(QStringLiteral("emptyPreview")));
         return;
     }
+    if (!m_activeTask.isEmpty())
+        return;
 
     const QString filter = QStringLiteral("%1 (*.pdf);;%2 (*.png)")
                              .arg(m_settings->trKey(QStringLiteral("formatPdf")),
@@ -959,17 +1452,68 @@ void AppController::exportRedacted()
         return;
     const QString path = paths.first();
 
-    waitForAllPagesLoaded();
-    rebuildMaskedPreview();
+    ExportJobInput job;
+    job.pageSlots = m_pageSlots;
+    job.docxCache = m_docxCache;
+    job.regions = m_redactions->allRegions();
+    job.mosaicStyle = m_mosaicStyle;
+    job.pageCount = m_pageCount;
+    job.outputPath = path;
 
-    QVector<QImage> pages;
-    pages.reserve(m_pageCount);
-    for (int i = 0; i < m_pageCount; ++i)
-        pages.push_back(m_provider->maskedPageAt(i));
+    beginTask(QStringLiteral("export"), false);
+    QPointer<AppController> self(this);
+    auto *watcher = new QFutureWatcher<bool>(this);
+    connect(watcher, &QFutureWatcher<bool>::finished, this, [this, watcher, path]() {
+        const bool ok = watcher->result();
+        watcher->deleteLater();
+        endTask();
+        if (ok && m_settings)
+            m_settings->rememberOutputPath(path);
+        emit actionFinished(ok, ok ? m_settings->trKey(QStringLiteral("exportOk"))
+                                   : QStringLiteral("导出失败"));
+    });
+    watcher->setFuture(QtConcurrent::run([job, self]() {
+        return runExportJob(job, [self](int done, int total) {
+            if (!self)
+                return;
+            const qreal progress = qreal(done) / qMax(1, total);
+            QMetaObject::invokeMethod(self.data(), "setTaskProgress", Qt::QueuedConnection,
+                                      Q_ARG(qreal, progress));
+        });
+    }));
+}
 
-    const bool ok = MosaicEngine::exportPages(pages, path);
-    if (ok && m_settings)
-        m_settings->rememberOutputPath(path);
-    emit actionFinished(ok, ok ? m_settings->trKey(QStringLiteral("exportOk"))
-                               : QStringLiteral("导出失败"));
+void AppController::prepareMaskedPdfForPdfTools()
+{
+    const QStringList sourcePaths = filePaths();
+    if (sourcePaths.isEmpty()) {
+        emit maskedPdfPathsReady(false, {}, false);
+        return;
+    }
+
+    if (m_redactions->allRegions().isEmpty()) {
+        emit maskedPdfPathsReady(true, sourcePaths, false);
+        return;
+    }
+
+    MaskedPdfCacheInput cacheInput;
+    cacheInput.pageSlots = m_pageSlots;
+    cacheInput.rawPages = m_rawPages;
+    cacheInput.maskedPages = m_provider ? m_provider->maskedPages() : QVector<QImage>{};
+    cacheInput.regions = m_redactions->allRegions();
+    cacheInput.mosaicStyle = m_mosaicStyle;
+    cacheInput.sourcePaths = sourcePaths;
+    cacheInput.docxCache = m_docxCache;
+
+    auto *watcher = new QFutureWatcher<MaskedPdfBuildResult>(this);
+    connect(watcher, &QFutureWatcher<MaskedPdfBuildResult>::finished, this, [this, watcher]() {
+        const MaskedPdfBuildResult result = watcher->result();
+        watcher->deleteLater();
+        emit maskedPdfPathsReady(result.ok, result.paths, result.readOnlyPreview);
+    });
+    watcher->setFuture(QtConcurrent::run([cacheInput]() {
+        MaskedPdfCacheInput input = cacheInput;
+        ensureMaskedPagesFilled(input);
+        return runMaskedPdfBuildFromCache(input);
+    }));
 }

@@ -191,14 +191,18 @@ QVector<QImage> PdfPageRenderer::renderPages(const QString &pdfPath, int firstPa
         for (int page = startIndex; page <= last; ++page) {
             const int i = page - 1;
             const QSizeF pageSize = doc.pagePointSize(i);
-            if (pageSize.isEmpty())
+            if (pageSize.isEmpty()) {
+                images.push_back(QImage());
                 continue;
+            }
 
             const qreal scale = dpi / 72.0;
             const QSize imageSize(qMax(1, int(pageSize.width() * scale)),
                                   qMax(1, int(pageSize.height() * scale)));
             const QImage image = doc.render(i, imageSize);
-            if (!image.isNull())
+            if (image.isNull())
+                images.push_back(QImage());
+            else
                 images.push_back(image.convertToFormat(QImage::Format_RGB32));
         }
         if (!images.isEmpty())
@@ -227,11 +231,15 @@ QVector<QImage> PdfPageRenderer::renderPages(const QString &pdfPath, int firstPa
     }
 
     for (int p = startIndex; p <= endIndex; ++p) {
-        if (!outputs.contains(p))
+        if (!outputs.contains(p)) {
+            images.push_back(QImage());
             continue;
+        }
         QImage img;
         if (img.load(outputs.value(p)))
             images.push_back(img.convertToFormat(QImage::Format_RGB32));
+        else
+            images.push_back(QImage());
     }
     return images;
 }

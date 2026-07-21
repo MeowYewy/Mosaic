@@ -66,6 +66,12 @@ class AppController : public QObject
 
     Q_PROPERTY(bool backgroundLoading READ backgroundLoading NOTIFY backgroundLoadingChanged)
 
+    Q_PROPERTY(bool fileDialogOpen READ fileDialogOpen NOTIFY fileDialogOpenChanged)
+
+    Q_PROPERTY(int currentPageWidth READ currentPageWidth NOTIFY previewLayoutChanged)
+
+    Q_PROPERTY(int currentPageHeight READ currentPageHeight NOTIFY previewLayoutChanged)
+
     Q_PROPERTY(QString toolMode READ toolMode WRITE setToolMode NOTIFY toolModeChanged)
 
     Q_PROPERTY(int mosaicStyle READ mosaicStyle WRITE setMosaicStyle NOTIFY mosaicStyleChanged)
@@ -73,6 +79,10 @@ class AppController : public QObject
     Q_PROPERTY(QString previewToken READ previewToken NOTIFY previewTokenChanged)
 
     Q_PROPERTY(qreal progress READ progress NOTIFY progressChanged)
+
+    Q_PROPERTY(QString activeTask READ activeTask NOTIFY activeTaskChanged)
+
+    Q_PROPERTY(QString taskLabel READ taskLabel NOTIFY activeTaskChanged)
 
     Q_PROPERTY(bool contentSortRunning READ contentSortRunning NOTIFY contentSortRunningChanged)
 
@@ -117,6 +127,12 @@ public:
 
     bool backgroundLoading() const { return m_backgroundLoading; }
 
+    bool fileDialogOpen() const { return m_fileDialogOpen; }
+
+    int currentPageWidth() const;
+
+    int currentPageHeight() const;
+
     bool hasPreview() const { return m_pageCount > 0; }
 
     QString toolMode() const { return m_toolMode; }
@@ -130,6 +146,10 @@ public:
     QString previewToken() const { return m_previewToken; }
 
     qreal progress() const { return m_progress; }
+
+    QString activeTask() const { return m_activeTask; }
+
+    QString taskLabel() const;
 
     bool contentSortRunning() const { return m_contentSortRunning; }
 
@@ -161,6 +181,8 @@ public:
 
     Q_INVOKABLE void exportRedacted();
 
+    Q_INVOKABLE void prepareMaskedPdfForPdfTools();
+
     Q_INVOKABLE void sortFilesByType();
 
     Q_INVOKABLE void sortFilesByContent();
@@ -180,6 +202,7 @@ public:
     Q_INVOKABLE void jumpToFile(const QString &path);
 
     QString previewFilePath() const;
+    QString pageFilePath(int page) const;
 
 
 
@@ -195,6 +218,10 @@ signals:
 
     void backgroundLoadingChanged();
 
+    void fileDialogOpenChanged();
+
+    void previewLayoutChanged();
+
     void toolModeChanged();
 
     void mosaicStyleChanged();
@@ -202,6 +229,8 @@ signals:
     void previewTokenChanged();
 
     void progressChanged();
+
+    void activeTaskChanged();
 
     void contentSortRunningChanged();
 
@@ -221,21 +250,31 @@ signals:
 
     void actionFinished(bool ok, const QString &message);
 
+    void maskedPdfPathsReady(bool ok, const QStringList &paths, bool readOnlyPreview);
+
 
 
 private slots:
     void updateContentSortProgress(qreal value);
+
+    void setTaskProgress(qreal value);
 
 
 
 private:
     void setProcessing(bool on);
 
+    void beginTask(const QString &taskId, bool blockUi = true);
+
+    void endTask();
+
     void setBackgroundLoading(bool on);
 
     void bumpPreviewToken();
 
-    void rebuildMaskedPreview();
+    void rebuildMaskedPreview(bool allPages = true);
+
+    void setFileDialogOpen(bool on);
 
     void cancelBackgroundLoad();
 
@@ -314,6 +353,8 @@ private:
 
     bool m_backgroundLoading = false;
 
+    bool m_fileDialogOpen = false;
+
     QString m_toolMode = QStringLiteral("draw");
 
     int m_mosaicStyle = 0; // 0 block, 1 pixelate
@@ -321,6 +362,8 @@ private:
     QString m_previewToken = QStringLiteral("0");
 
     qreal m_progress = 0;
+
+    QString m_activeTask;
 
     int m_tokenCounter = 0;
 

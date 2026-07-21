@@ -177,6 +177,14 @@ QString AppSettings::trKey(const QString &key) const
             {QStringLiteral("zh_CN"), QStringLiteral("拖放文件到此处或点击浏览文件")},
             {QStringLiteral("en"), QStringLiteral("Drop files here or click Browse")},
         }},
+        {QStringLiteral("maskedPreviewReadOnly"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("脱敏预览（只读）— 基于退出脱敏模式前的最后设置")},
+            {QStringLiteral("en"), QStringLiteral("Redacted preview (read-only) — last mask settings before exit")},
+        }},
+        {QStringLiteral("maskedPreviewLockedHint"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("脱敏预览中，无法添加或修改文件")},
+            {QStringLiteral("en"), QStringLiteral("Redacted preview active; file list is locked")},
+        }},
         {QStringLiteral("browse"), {
             {QStringLiteral("zh_CN"), QStringLiteral("浏览文件")},
             {QStringLiteral("en"), QStringLiteral("Browse")},
@@ -234,12 +242,12 @@ QString AppSettings::trKey(const QString &key) const
             {QStringLiteral("en"), QStringLiteral("Redacted preview")},
         }},
         {QStringLiteral("manualHint"), {
-            {QStringLiteral("zh_CN"), QStringLiteral("←/Q上一页 · →/E下一页 · R全览 · Ctrl+滚轮缩放 · 滚轮移动 · 右键拖拽 · 1绘制 2选择 3删除 · Enter脱敏 · Tab样式")},
-            {QStringLiteral("en"), QStringLiteral("←/Q prev · →/E next · R fit · Ctrl+wheel · wheel pan · R-drag · 1/2/3 · Enter masked · Tab style")},
+            {QStringLiteral("zh_CN"), QStringLiteral("←/Q上一页 · →/E下一页 · R全览 · Ctrl+滚轮缩放 · 1绘制 2穿透绘制 3选择 4删除 · Enter脱敏 · Tab样式 · 穿透标记作用于当前文件全部页")},
+            {QStringLiteral("en"), QStringLiteral("←/Q · →/E · R fit · Ctrl+wheel · 1 draw · 2 fixed · 3 select · 4 delete · Enter masked · Tab style · fixed marks apply to all pages of the file")},
         }},
         {QStringLiteral("maskShortcutTooltip"), {
-            {QStringLiteral("zh_CN"), QStringLiteral("上一页      Q / ←\n下一页      E / →\n全览        R\n缩放        Ctrl + 滚轮\n移动视图    滚轮 / 右键拖拽\n绘制        1\n选择        2\n删除        3\n脱敏预览    Enter\n切换样式    Tab")},
-            {QStringLiteral("en"), QStringLiteral("Previous page   Q / ←\nNext page       E / →\nFit view         R\nZoom            Ctrl + wheel\nPan             Wheel / right-drag\nDraw            1\nSelect          2\nDelete          3\nMasked preview  Enter\nToggle style    Tab")},
+            {QStringLiteral("zh_CN"), QStringLiteral("上一页      Q / ←\n下一页      E / →\n全览        R\n缩放        Ctrl + 滚轮\n移动视图    滚轮 / 右键拖拽\n绘制        1\n穿透绘制    2\n选择        3\n删除        4\n脱敏预览    Enter\n切换样式    Tab")},
+            {QStringLiteral("en"), QStringLiteral("Previous page   Q / ←\nNext page       E / →\nFit view         R\nZoom            Ctrl + wheel\nPan             Wheel / right-drag\nDraw            1\nFixed mark      2\nSelect          3\nDelete          4\nMasked preview  Enter\nToggle style    Tab")},
         }},
         {QStringLiteral("maskShortcutTooltipMasked"), {
             {QStringLiteral("zh_CN"), QStringLiteral("全览        R\n切换样式    Tab\n返回编辑    Enter\n删除选中    Delete")},
@@ -272,6 +280,10 @@ QString AppSettings::trKey(const QString &key) const
         {QStringLiteral("shortcutSelect"), {
             {QStringLiteral("zh_CN"), QStringLiteral("选择")},
             {QStringLiteral("en"), QStringLiteral("Select")},
+        }},
+        {QStringLiteral("shortcutFixedDraw"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("穿透绘制")},
+            {QStringLiteral("en"), QStringLiteral("Fixed mark")},
         }},
         {QStringLiteral("shortcutDeleteMark"), {
             {QStringLiteral("zh_CN"), QStringLiteral("删除")},
@@ -320,6 +332,10 @@ QString AppSettings::trKey(const QString &key) const
         {QStringLiteral("toolDraw"), {
             {QStringLiteral("zh_CN"), QStringLiteral("绘制")},
             {QStringLiteral("en"), QStringLiteral("Draw")},
+        }},
+        {QStringLiteral("toolFixedDraw"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("穿透绘制")},
+            {QStringLiteral("en"), QStringLiteral("Fixed mark")},
         }},
         {QStringLiteral("toolSelect"), {
             {QStringLiteral("zh_CN"), QStringLiteral("选择")},
@@ -380,6 +396,10 @@ QString AppSettings::trKey(const QString &key) const
         {QStringLiteral("checkUpdate"), {
             {QStringLiteral("zh_CN"), QStringLiteral("检查更新")},
             {QStringLiteral("en"), QStringLiteral("Check for Updates")},
+        }},
+        {QStringLiteral("newVersion"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("新版本")},
+            {QStringLiteral("en"), QStringLiteral("New")},
         }},
         {QStringLiteral("installUpdate"), {
             {QStringLiteral("zh_CN"), QStringLiteral("安装")},
@@ -748,6 +768,14 @@ QString AppSettings::trKey(const QString &key) const
         {QStringLiteral("loadingPreview"), {
             {QStringLiteral("zh_CN"), QStringLiteral("正在加载预览…")},
             {QStringLiteral("en"), QStringLiteral("Loading preview…")},
+        }},
+        {QStringLiteral("exporting"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("正在导出…")},
+            {QStringLiteral("en"), QStringLiteral("Exporting…")},
+        }},
+        {QStringLiteral("preparingMaskedPreview"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("正在生成脱敏预览…")},
+            {QStringLiteral("en"), QStringLiteral("Preparing redacted preview…")},
         }},
         {QStringLiteral("detecting"), {
             {QStringLiteral("zh_CN"), QStringLiteral("正在加载文件…")},

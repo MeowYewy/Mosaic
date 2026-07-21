@@ -28,8 +28,10 @@ public:
     static constexpr int kInitialPages = 2;
     static constexpr int kLazyBatchSize = 4;
 
-    // Preview/export render DPI — keep high for clear manual marking & export.
-    static constexpr int kRenderDpi = 300;
+    // Preview uses lower DPI for speed; export keeps full resolution.
+    static constexpr int kPreviewDpi = 150;
+    static constexpr int kExportDpi = 300;
+    static constexpr int kRenderDpi = kExportDpi;
 
     static QVector<PageSlot> buildManifest(const QStringList &paths,
                                            QHash<QString, DocxFileCache> *docxCacheOut = nullptr);
@@ -39,7 +41,8 @@ public:
     static void primeDocxCaches(const QStringList &paths, QHash<QString, DocxFileCache> *out);
     static DocxFileCache buildDocxCacheEntry(const QString &path);
 
-    PageContent loadSlot(const PageSlot &slot, QHash<QString, DocxFileCache> *docxCache = nullptr);
+    PageContent loadSlot(const PageSlot &slot, QHash<QString, DocxFileCache> *docxCache = nullptr,
+                         int dpi = kPreviewDpi);
 
     // enableOcr: off by default for fast preview; diag / future auto-mode can turn on.
     QVector<PageContent> loadFiles(const QStringList &paths,

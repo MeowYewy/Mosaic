@@ -26,9 +26,10 @@ Item {
     readonly property string iconFileName: {
         switch (resolvedIcon) {
         case "fit-view":
-        case "expand": return "expand.svg"
-        case "draw": return "square.svg"
-        case "select": return "square-dashed-mouse-pointer.svg"
+        case "expand": return "shrink.svg"
+        case "draw": return "square-dashed-mouse-pointer.svg"
+        case "select": return "mouse-pointer-2.svg"
+        case "fixed": return "square-mouse-pointer.svg"
         case "delete": return "trash-2.svg"
         case "style-block": return "square-filled.svg"
         case "style-pixel": return "grid-3x3.svg"

@@ -35,7 +35,7 @@ int main(int argc, char *argv[])
     app.setOrganizationName(QStringLiteral("TechG"));
     app.setOrganizationDomain(QStringLiteral("techg.local"));
     app.setApplicationName(QStringLiteral("Mosaic"));
-    app.setApplicationVersion(QStringLiteral("0.1.1"));
+    app.setApplicationVersion(QStringLiteral("0.1.2"));
 
     QIcon appIcon(QStringLiteral(":/qt/qml/ProjectO/resources/app-icon.png"));
     if (appIcon.isNull())
@@ -64,7 +64,7 @@ int main(int argc, char *argv[])
                 for (const QString &path : paths)
                     list.append(path);
                 maskController.addFilesFromList(list);
-            } else {
+            } else if (!pdfController.maskedPreview()) {
                 pdfController.addFiles(paths);
             }
         });

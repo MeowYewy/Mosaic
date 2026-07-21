@@ -1,6 +1,6 @@
 @echo off
 setlocal
-echo Mosaic - Tesseract OCR setup
+echo Mask Studio - Tesseract OCR setup
 echo.
 echo OCR is required for scanned images (PNG/JPEG) and improves bbox accuracy on PDF pages.
 echo Language pack: chi_sim + eng (Chinese + English mixed documents)

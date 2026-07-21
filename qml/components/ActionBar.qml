@@ -20,6 +20,11 @@ RowLayout {
     property string watermarkText: ""
     property string watermarkColor: Theme.watermarkDefaultColor
 
+    function commitPageRange() {
+        if (actionBar.showPageRange && pageRangeField.boundPath.length > 0)
+            PdfController.setPageRange(pageRangeField.boundPath, pageRangeField.text)
+    }
+
     Text {
         Layout.fillWidth: true
         Layout.minimumWidth: 120
@@ -96,6 +101,7 @@ RowLayout {
             onBoundPathChanged: text = PdfController.pageRange(boundPath)
             Component.onCompleted: text = PdfController.pageRange(boundPath)
             onTextEdited: PdfController.setPageRange(boundPath, text)
+            onEditingFinished: PdfController.setPageRange(boundPath, text)
 
             Keys.onPressed: function(event) {
                 if (event.key === Qt.Key_Escape) {
@@ -154,11 +160,13 @@ RowLayout {
             enabled: PdfController.fileCount > 0 && !PdfController.busy
                      && (!actionBar.showWatermark || actionBar.watermarkText.trim().length > 0)
             onClicked: {
+                actionBar.commitPageRange()
+                const rangeText = pageRangeField.visible ? pageRangeField.text.trim() : ""
                 if (actionBar.showWatermark)
                     PdfController.runCurrentAction(actionBar.watermarkCount, actionBar.watermarkText,
-                                                  actionBar.watermarkColor)
+                                                  actionBar.watermarkColor, rangeText)
                 else
-                    PdfController.runCurrentAction(actionBar.optionValue, "")
+                    PdfController.runCurrentAction(actionBar.optionValue, "", "", rangeText)
             }
         }
     }

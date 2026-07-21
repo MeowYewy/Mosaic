@@ -108,14 +108,15 @@ QVector<PageSlot> DocumentLoader::buildManifest(const QStringList &paths,
     QVector<PageSlot> pageSlots;
     for (const QString &path : paths) {
         const QFileInfo info(path);
+        const QString absPath = info.absoluteFilePath();
         const QString ext = info.suffix().toLower();
         const PageSlot::Kind kind = kindForExt(ext);
 
         if (kind == PageSlot::Pdf) {
-            const int count = qMax(1, PdfPageRenderer::pageCount(path));
+            const int count = qMax(1, PdfPageRenderer::pageCount(absPath));
             for (int i = 0; i < count; ++i) {
                 PageSlot slot;
-                slot.path = path;
+                slot.path = absPath;
                 slot.kind = PageSlot::Pdf;
                 slot.indexInFile = i;
                 slot.pagesInFile = count;
@@ -126,19 +127,19 @@ QVector<PageSlot> DocumentLoader::buildManifest(const QStringList &paths,
 
         if (kind == PageSlot::Docx) {
             DocxFileCache cache;
-            if (docxCacheOut && docxCacheOut->contains(path))
-                cache = docxCacheOut->value(path);
+            if (docxCacheOut && docxCacheOut->contains(absPath))
+                cache = docxCacheOut->value(absPath);
             else
-                cache = DocxRenderer::open(path);
+                cache = DocxRenderer::open(absPath);
 
             if (docxCacheOut)
-                docxCacheOut->insert(path, cache);
+                docxCacheOut->insert(absPath, cache);
             const int count = cache.valid ? qMax(1, cache.pageCount) : 0;
             if (count <= 0)
                 continue;
             for (int i = 0; i < count; ++i) {
                 PageSlot slot;
-                slot.path = path;
+                slot.path = absPath;
                 slot.kind = PageSlot::Docx;
                 slot.indexInFile = i;
                 slot.pagesInFile = count;
@@ -148,7 +149,7 @@ QVector<PageSlot> DocumentLoader::buildManifest(const QStringList &paths,
         }
 
         PageSlot slot;
-        slot.path = path;
+        slot.path = absPath;
         slot.kind = PageSlot::Image;
         slot.indexInFile = 0;
         slot.pagesInFile = 1;
@@ -158,7 +159,8 @@ QVector<PageSlot> DocumentLoader::buildManifest(const QStringList &paths,
 }
 
 PageContent DocumentLoader::loadSlot(const PageSlot &slot,
-                                     QHash<QString, DocxFileCache> *docxCache)
+                                     QHash<QString, DocxFileCache> *docxCache,
+                                     int dpi)
 {
     PageContent pc;
     if (slot.path.isEmpty())
@@ -174,7 +176,7 @@ PageContent DocumentLoader::loadSlot(const PageSlot &slot,
         break;
     }
     case PageSlot::Pdf: {
-        pc.image = PdfPageRenderer::renderPage(slot.path, slot.indexInFile + 1, kRenderDpi);
+        pc.image = PdfPageRenderer::renderPage(slot.path, slot.indexInFile + 1, dpi);
         break;
     }
     case PageSlot::Docx: {
@@ -184,7 +186,7 @@ PageContent DocumentLoader::loadSlot(const PageSlot &slot,
             docxCache->insert(slot.path, DocxRenderer::open(slot.path));
         const DocxFileCache &cache = docxCache->value(slot.path);
         if (!cache.pdfPath.isEmpty())
-            pc.image = PdfPageRenderer::renderPage(cache.pdfPath, slot.indexInFile + 1, kRenderDpi);
+            pc.image = PdfPageRenderer::renderPage(cache.pdfPath, slot.indexInFile + 1, dpi);
         else
             pc.image = DocxRenderer::renderPage(cache, slot.indexInFile);
         if (slot.indexInFile < cache.pageTexts.size())

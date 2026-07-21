@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.1.2",
+    "date": "2026-07-21",
+    "notes": {
+      "zh_CN": "新增穿透选中功能；\n优化了操作逻辑。",
+      "en": "Added fixed-position draw; improved interaction logic."
+    }
+  },
+  {
     "version": "0.1.1",
     "date": "2026-07-20",
     "notes": {

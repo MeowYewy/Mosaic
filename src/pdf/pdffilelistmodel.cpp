@@ -23,7 +23,10 @@ QVariant PdfFileListModel::data(const QModelIndex &index, int role) const
     const QFileInfo info(m_paths.at(index.row()));
     switch (role) {
     case PathRole: return info.absoluteFilePath();
-    case NameRole: return info.fileName();
+    case NameRole:
+        if (index.row() < m_displayNames.size() && !m_displayNames.at(index.row()).isEmpty())
+            return m_displayNames.at(index.row());
+        return info.fileName();
     case TypeRole: return QMimeDatabase().mimeTypeForFile(info).name();
     default: return {};
     }
@@ -86,6 +89,25 @@ void PdfFileListModel::move(int from, int to)
     const int dest = to > from ? to + 1 : to;
     beginMoveRows({}, from, from, {}, dest);
     m_paths.move(from, to);
+    if (m_displayNames.size() == m_paths.size())
+        m_displayNames.move(from, to);
     endMoveRows();
+    emit filesChanged();
+}
+
+void PdfFileListModel::setPaths(const QStringList &paths, const QStringList &displayNames)
+{
+    QStringList resolved;
+    resolved.reserve(paths.size());
+    for (const QString &path : paths)
+        resolved.append(QFileInfo(path).absoluteFilePath());
+
+    beginResetModel();
+    m_paths = resolved;
+    m_displayNames = displayNames;
+    if (m_displayNames.size() != m_paths.size())
+        m_displayNames.clear();
+    endResetModel();
+    emit countChanged();
     emit filesChanged();
 }

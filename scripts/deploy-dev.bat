@@ -11,12 +11,12 @@ for %%D in (
   "%PROJECT_ROOT%\build\release"
   "%PROJECT_ROOT%\build\Desktop_Qt_6_11_1_MinGW_64_bit_Debug"
 ) do (
-  if exist "%%~D\Mosaic.exe" (
+  if exist "%%~D\MaskStudio.exe" (
     echo.
     echo === Deploy Qt runtime ===
     echo Target: %%~D
     pushd "%%~D"
-    windeployqt --qmldir "%PROJECT_ROOT%\qml" --no-translations Mosaic.exe
+    windeployqt --qmldir "%PROJECT_ROOT%\qml" --no-translations MaskStudio.exe
     if errorlevel 1 (
       popd
       exit /b 1
@@ -33,7 +33,7 @@ for %%D in (
 )
 
 if "%DEPLOYED%"=="0" (
-  echo ERROR: Mosaic.exe not found. Build first.
+  echo ERROR: MaskStudio.exe not found. Build first.
   exit /b 1
 )
 

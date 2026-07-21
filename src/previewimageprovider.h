@@ -19,6 +19,7 @@ public:
 
     QImage rawPageAt(int index) const;
     QImage maskedPageAt(int index) const;
+    QVector<QImage> maskedPages() const { return m_maskedPages; }
 
 private:
     QVector<QImage> m_rawPages;

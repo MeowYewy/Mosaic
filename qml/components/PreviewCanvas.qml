@@ -10,6 +10,8 @@ Rectangle {
     border.width: 1
     clip: true
 
+    readonly property bool exportBusy: AppController.activeTask === "export"
+
     property real drawStartX: 0
     property real drawStartY: 0
     property bool drawing: false
@@ -155,6 +157,7 @@ Rectangle {
                 property: "interactive"
                 value: AppController.toolMode !== "select"
                        && AppController.toolMode !== "draw"
+                       && AppController.toolMode !== "fixedDraw"
                        && canvas.editRegionId < 0
                        && !canvas.drawing
             }
@@ -186,8 +189,20 @@ Rectangle {
             readonly property real availW: Math.max(1, canvas.width - 24)
             readonly property real availH: Math.max(1, canvas.height - 24)
             readonly property real zoom: AppController.previewZoom
-            readonly property real srcW: pageImage.sourceSize.width
-            readonly property real srcH: pageImage.sourceSize.height
+            readonly property real srcW: {
+                const _ = AppController.previewToken
+                const w = AppController.currentPageWidth
+                if (w > 0)
+                    return w
+                return pageImage.sourceSize.width > 0 ? pageImage.sourceSize.width : 595
+            }
+            readonly property real srcH: {
+                const _ = AppController.previewToken
+                const h = AppController.currentPageHeight
+                if (h > 0)
+                    return h
+                return pageImage.sourceSize.height > 0 ? pageImage.sourceSize.height : 842
+            }
             readonly property real fitScale: (srcW <= 0 || srcH <= 0)
                 ? 1 : Math.min(availW / srcW, availH / srcH)
             readonly property real paintW: srcW * fitScale * zoom
@@ -264,16 +279,18 @@ Rectangle {
 
                     Rectangle {
                         anchors.fill: parent
-                        color: source === "manual" ? Theme.maskManualFill : "#F59E0B55"
+                        color: source === "fixed" ? "#6366F133"
+                              : (source === "manual" ? Theme.maskManualFill : "#F59E0B55")
                         border.width: isSelected ? 2 : 1
-                        border.color: source === "manual" ? Theme.maskManual : Theme.maskAuto
+                        border.color: source === "fixed" ? "#6366F1"
+                                    : (source === "manual" ? Theme.maskManual : Theme.maskAuto)
                     }
 
                     Text {
                         anchors.left: parent.left
                         anchors.top: parent.top
                         anchors.margins: 2
-                        text: source === "auto" ? "A" : "M"
+                        text: source === "auto" ? "A" : (source === "fixed" ? "F" : "M")
                         font.pixelSize: 10
                         color: Theme.text
                         visible: parent.height > 14
@@ -286,6 +303,7 @@ Rectangle {
                         anchors.right: resizeHit.left
                         anchors.bottom: resizeHit.top
                         enabled: AppController.toolMode === "select"
+                                 && !canvas.exportBusy
                         cursorShape: Qt.PointingHandCursor
                         preventStealing: true
                         property real grabLayerX
@@ -394,14 +412,17 @@ Rectangle {
                 y: canvas.draftY
                 width: canvas.draftW
                 height: canvas.draftH
-                color: Theme.maskManualDraft
-                border.color: Theme.maskManual
+                color: AppController.toolMode === "fixedDraw" ? "#6366F133" : Theme.maskManualDraft
+                border.color: AppController.toolMode === "fixedDraw" ? "#6366F1" : Theme.maskManual
                 border.width: 2
             }
 
             MouseArea {
                 anchors.fill: parent
-                enabled: AppController.toolMode === "draw" && !AppController.showMaskedPreview
+                enabled: (AppController.toolMode === "draw"
+                          || AppController.toolMode === "fixedDraw")
+                         && !AppController.showMaskedPreview
+                         && !canvas.exportBusy
                 cursorShape: Qt.CrossCursor
                 preventStealing: true
                 z: 100
@@ -429,12 +450,17 @@ Rectangle {
                     const p1 = canvas.normFromLayer(canvas.draftX, canvas.draftY)
                     const p2 = canvas.normFromLayer(canvas.draftX + canvas.draftW,
                                                     canvas.draftY + canvas.draftH)
-                    AppController.redactions.addManual(
-                        AppController.currentPage,
-                        Math.min(p1.x, p2.x),
-                        Math.min(p1.y, p2.y),
-                        Math.abs(p2.x - p1.x),
-                        Math.abs(p2.y - p1.y))
+                    const nx = Math.min(p1.x, p2.x)
+                    const ny = Math.min(p1.y, p2.y)
+                    const nw = Math.abs(p2.x - p1.x)
+                    const nh = Math.abs(p2.y - p1.y)
+                    if (AppController.toolMode === "fixedDraw") {
+                        AppController.redactions.addFixed(
+                            AppController.previewFilePath, nx, ny, nw, nh)
+                    } else {
+                        AppController.redactions.addManual(
+                            AppController.currentPage, nx, ny, nw, nh)
+                    }
                 }
             }
         }
@@ -444,7 +470,7 @@ Rectangle {
             id: panArea
             anchors.fill: parent
             acceptedButtons: Qt.RightButton
-            enabled: AppController.hasPreview && !AppController.processing
+            enabled: AppController.hasPreview && !AppController.processing && !canvas.exportBusy
             preventStealing: true
             z: 5
             cursorShape: pressed ? Qt.ClosedHandCursor : Qt.ArrowCursor
@@ -478,11 +504,11 @@ Rectangle {
         }
     }
 
-    // Busy overlay while detecting
+    // Busy overlay while loading (not during export — export keeps preview interactive)
     Rectangle {
         anchors.fill: parent
         radius: parent.radius
-        visible: AppController.processing
+        visible: AppController.processing && !canvas.exportBusy
         color: Theme.surface
         opacity: 0.88
 
@@ -495,7 +521,9 @@ Rectangle {
         Text {
             anchors.centerIn: parent
             anchors.verticalCenterOffset: 28
-            text: Theme.tr("loadingPreview")
+            text: AppController.taskLabel.length > 0
+                  ? AppController.taskLabel
+                  : Theme.tr("loadingPreview")
             color: Theme.textBody
             font: Theme.mainFont
         }

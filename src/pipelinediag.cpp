@@ -29,7 +29,7 @@ QString makeTestPng()
     p.drawText(20, 150, QString::fromUtf8(u8"身份证：110101199001011234"));
     p.end();
 
-    const QString path = QDir::tempPath() + QStringLiteral("/mosaic_diag.png");
+    const QString path = QDir::tempPath() + QStringLiteral("/maskstudio_diag.png");
     if (!img.save(path))
         return {};
     return path;
@@ -59,7 +59,7 @@ QString makeTestDocx()
                 .toUtf8());
     f.close();
 
-    const QString docxPath = QDir::tempPath() + QStringLiteral("/mosaic_diag.docx");
+    const QString docxPath = QDir::tempPath() + QStringLiteral("/maskstudio_diag.docx");
     if (QFile::exists(docxPath) && !QFile::remove(docxPath))
         return {};
 

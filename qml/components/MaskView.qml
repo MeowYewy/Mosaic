@@ -19,8 +19,9 @@ Item {
             { labelKey: "shortcutZoom", keys: Theme.tr("shortcutZoomKeys") },
             { labelKey: "shortcutPan", keys: Theme.tr("shortcutPanKeys") },
             { labelKey: "shortcutDraw", keys: "1" },
-            { labelKey: "shortcutSelect", keys: "2" },
-            { labelKey: "shortcutDeleteMark", keys: "3" },
+            { labelKey: "shortcutFixedDraw", keys: "2" },
+            { labelKey: "shortcutSelect", keys: "3" },
+            { labelKey: "shortcutDeleteMark", keys: "4" },
             { labelKey: "shortcutMaskedPreview", keys: "Enter" },
             { labelKey: "shortcutToggleStyle", keys: "Tab" }
         ]
@@ -148,6 +149,8 @@ Item {
                         Layout.fillWidth: true
                         text: Theme.tr("export")
                         enabled: AppController.hasPreview && !AppController.processing
+                                 && AppController.activeTask !== "export"
+                                 && !AppController.backgroundLoading
                         onClicked: AppController.exportRedacted()
                     }
                 }

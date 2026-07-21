@@ -46,40 +46,40 @@ Rectangle {
             Layout.maximumWidth: 260
         }
 
-        ToolButton {
-            id: menuBtn
-            implicitWidth: 36
-            implicitHeight: 36
-            hoverEnabled: true
-            focusPolicy: Qt.NoFocus
-            background: Rectangle {
-                radius: Theme.radiusSm
-                color: menuBtn.hovered ? Theme.menuHover : "transparent"
-            }
-            contentItem: Item {
-                LucideIcon {
-                    anchors.centerIn: parent
-                    iconSize: 18
-                    name: "menu"
-                    strokeColor: Theme.iconDefault
+        Item {
+            Layout.preferredWidth: 36
+            Layout.preferredHeight: 36
+            Layout.topMargin: UpdateChecker.hasUpdate ? 4 : 0
+
+            ToolButton {
+                id: menuBtn
+                anchors.fill: parent
+                hoverEnabled: true
+                focusPolicy: Qt.NoFocus
+                background: Rectangle {
+                    radius: Theme.radiusSm
+                    color: menuBtn.hovered ? Theme.menuHover : "transparent"
                 }
+                contentItem: Item {
+                    LucideIcon {
+                        anchors.centerIn: parent
+                        iconSize: 18
+                        name: "menu"
+                        strokeColor: Theme.iconDefault
+                    }
+                }
+                onClicked: header.menuRequested(menuBtn)
             }
 
-            Rectangle {
+            UpdateNewVersionLabel {
+                compact: true
+                anchors.left: parent.right
                 anchors.top: parent.top
-                anchors.right: parent.right
-                anchors.topMargin: 5
-                anchors.rightMargin: 5
-                width: 7
-                height: 7
-                radius: width / 2
-                color: Theme.accent
+                anchors.leftMargin: -9
+                anchors.topMargin: -5
                 visible: UpdateChecker.hasUpdate
-                border.width: 1.5
-                border.color: Theme.surface
+                z: 1
             }
-
-            onClicked: header.menuRequested(menuBtn)
         }
     }
 }

@@ -4,7 +4,7 @@ setlocal EnableDelayedExpansion
 set "PROJECT_ROOT=%~dp0.."
 for %%I in ("%PROJECT_ROOT%") do set "PROJECT_ROOT=%%~fI"
 
-set "APP_VERSION=0.1.1"
+set "APP_VERSION=0.1.0"
 if exist "%PROJECT_ROOT%\APP_VERSION.txt" (
     for /f "usebackq delims=" %%V in ("%PROJECT_ROOT%\APP_VERSION.txt") do set "APP_VERSION=%%V"
 )
@@ -73,6 +73,9 @@ if exist "%PROJECT_ROOT%\build\Desktop_Qt_6_11_1_MinGW_64_bit_Debug\Mosaic.exe" 
 if exist "%PROJECT_ROOT%\build\Mosaic.exe" (
     set "BUILD_DIR=%PROJECT_ROOT%\build"
     set "BUILD_EXE=%BUILD_DIR%\Mosaic.exe"
+)
+if not exist "%BUILD_EXE%" if exist "%BUILD_DIR%\MaskStudio.exe" (
+    set "BUILD_EXE=%BUILD_DIR%\MaskStudio.exe"
 )
 set "DIST_ROOT=%PROJECT_ROOT%\dist"
 set "DIST_DIR=%DIST_ROOT%\Mosaic_%APP_VERSION%_win64"

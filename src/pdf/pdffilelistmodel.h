@@ -26,6 +26,8 @@ public:
     Q_INVOKABLE void removeAt(int index);
     Q_INVOKABLE void clear();
     Q_INVOKABLE void move(int from, int to);
+    Q_INVOKABLE void setPaths(const QStringList &paths,
+                              const QStringList &displayNames = {});
     QStringList paths() const { return m_paths; }
 
 signals:
@@ -34,4 +36,5 @@ signals:
 
 private:
     QStringList m_paths;
+    QStringList m_displayNames;
 };

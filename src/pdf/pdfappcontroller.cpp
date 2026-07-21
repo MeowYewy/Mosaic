@@ -29,6 +29,34 @@
 
 
 
+namespace {
+
+QString resolvePathKey(const QString &path)
+{
+    if (path.isEmpty())
+        return {};
+    return QFileInfo(path).absoluteFilePath();
+}
+
+QString activePreviewPath(const PdfPreviewModel &preview, const PdfFileListModel &files)
+{
+    const QString current = preview.currentFile();
+    if (!current.isEmpty())
+        return resolvePathKey(current);
+    const QStringList paths = files.paths();
+    return paths.isEmpty() ? QString() : resolvePathKey(paths.first());
+}
+
+QString resolveInputToPdf(PdfEngine &engine, const QString &path, QTemporaryDir *tempDir,
+                          int *tempSerial, QString *error)
+{
+    return engine.resolveToPdfPath(path, tempDir, tempSerial, error);
+}
+
+} // namespace
+
+
+
 PdfAppController::PdfAppController(PdfThumbProvider *imageProvider, AppSettings *settings,
                              FilePicker *filePicker, QObject *parent)
 
@@ -205,6 +233,9 @@ void PdfAppController::addFiles(const QStringList &paths)
 
         return;
 
+    if (m_maskedPreview)
+        return;
+
 
 
     m_files.addFiles(paths);
@@ -229,13 +260,15 @@ void PdfAppController::addFiles(const QStringList &paths)
 
 void PdfAppController::replaceFiles(const QStringList &paths)
 {
+    m_maskedPreview = false;
+    m_sourcePaths = resolvePaths(paths);
     m_files.clear();
     if (!m_pageRanges.isEmpty()) {
         m_pageRanges.clear();
         emit pageRangesChanged();
     }
-    if (!paths.isEmpty()) {
-        addFiles(paths);
+    if (!m_sourcePaths.isEmpty()) {
+        addFiles(m_sourcePaths);
     } else {
         setBusy(false);
         setProgress(0);
@@ -244,6 +277,75 @@ void PdfAppController::replaceFiles(const QStringList &paths)
         emit fileCountChanged();
         notifyPreviewChanged();
     }
+    emit maskedPreviewChanged();
+    emit sourceFilePathsChanged();
+}
+
+QStringList PdfAppController::resolvePaths(const QStringList &paths) const
+{
+    QStringList resolved;
+    resolved.reserve(paths.size());
+    for (const QString &path : paths)
+        resolved.append(QFileInfo(path).absoluteFilePath());
+    return resolved;
+}
+
+void PdfAppController::applyMaskedPreview(const QStringList &maskedPaths,
+                                          const QStringList &sourcePaths)
+{
+    const QStringList resolvedMasked = resolvePaths(maskedPaths);
+    const QStringList resolvedSource = resolvePaths(sourcePaths);
+    if (resolvedMasked.isEmpty())
+        return;
+
+    m_sourcePaths = resolvedSource;
+    m_maskedPreview = true;
+
+    QStringList displayNames;
+    displayNames.reserve(resolvedSource.size());
+    for (const QString &path : resolvedSource)
+        displayNames.append(QFileInfo(path).fileName());
+
+    m_files.setPaths(resolvedMasked, displayNames);
+
+    const QHash<QString, QString> preserved = m_pageRanges;
+    m_pageRanges.clear();
+    for (int i = 0; i < resolvedMasked.size(); ++i) {
+        const QString maskedKey = resolvePathKey(resolvedMasked.at(i));
+        const QString sourceKey = i < resolvedSource.size()
+                                      ? resolvePathKey(resolvedSource.at(i))
+                                      : QString();
+        if (!sourceKey.isEmpty() && preserved.contains(sourceKey))
+            m_pageRanges.insert(maskedKey, preserved.value(sourceKey));
+        else if (preserved.contains(maskedKey))
+            m_pageRanges.insert(maskedKey, preserved.value(maskedKey));
+    }
+    if (m_pageRanges != preserved)
+        emit pageRangesChanged();
+
+    if (!resolvedMasked.isEmpty())
+        m_preview.setCurrentFile(resolvedMasked.first());
+
+    setStatus({});
+    emit maskedPreviewChanged();
+    emit sourceFilePathsChanged();
+    emit fileCountChanged();
+    notifyPreviewChanged();
+}
+
+void PdfAppController::clearMaskedPreview()
+{
+    if (!m_maskedPreview)
+        return;
+
+    m_maskedPreview = false;
+    m_files.setPaths(m_sourcePaths);
+    if (!m_sourcePaths.isEmpty())
+        m_preview.setCurrentFile(m_sourcePaths.first());
+    setStatus({});
+    emit maskedPreviewChanged();
+    emit fileCountChanged();
+    notifyPreviewChanged();
 }
 
 
@@ -281,6 +383,8 @@ void PdfAppController::browseAndAddFiles()
 
 void PdfAppController::clearFiles()
 {
+    if (m_maskedPreview)
+        return;
     m_files.clear();
     m_preview.setCurrentFile({});
     setStatus({});
@@ -293,6 +397,8 @@ void PdfAppController::clearFiles()
 
 void PdfAppController::removeFileAt(int index)
 {
+    if (m_maskedPreview)
+        return;
     const QString path = filePathAt(index);
     m_files.removeAt(index);
     if (!path.isEmpty() && m_pageRanges.remove(path) > 0)
@@ -318,23 +424,47 @@ bool PdfAppController::anyPageRangeSet() const
 
 void PdfAppController::setPageRange(const QString &path, const QString &text)
 {
-    if (path.isEmpty())
+    const QString key = resolvePathKey(path);
+    if (key.isEmpty())
         return;
 
     const QString trimmed = text.trimmed();
-    if (m_pageRanges.value(path) == trimmed)
+    if (m_pageRanges.value(key) == trimmed)
         return;
 
     if (trimmed.isEmpty())
-        m_pageRanges.remove(path);
+        m_pageRanges.remove(key);
     else
-        m_pageRanges.insert(path, trimmed);
+        m_pageRanges.insert(key, trimmed);
     emit pageRangesChanged();
 }
 
 QString PdfAppController::pageRange(const QString &path) const
 {
-    return m_pageRanges.value(path);
+    return m_pageRanges.value(resolvePathKey(path));
+}
+
+QString PdfAppController::resolvedPageRangeText(const QString &path,
+                                                const QString &overrideText) const
+{
+    const QString trimmed = overrideText.trimmed();
+    if (!trimmed.isEmpty())
+        return trimmed;
+
+    const QString key = resolvePathKey(path);
+    if (m_pageRanges.contains(key))
+        return m_pageRanges.value(key);
+
+    if (m_maskedPreview) {
+        const QStringList paths = m_files.paths();
+        const int idx = paths.indexOf(key);
+        if (idx >= 0 && idx < m_sourcePaths.size()) {
+            const QString sourceKey = resolvePathKey(m_sourcePaths.at(idx));
+            if (m_pageRanges.contains(sourceKey))
+                return m_pageRanges.value(sourceKey);
+        }
+    }
+    return {};
 }
 
 void PdfAppController::pruneStalePageRanges()
@@ -368,6 +498,9 @@ void PdfAppController::selectPreviewFile(const QString &path)
 void PdfAppController::moveFile(int from, int to)
 
 {
+
+    if (m_maskedPreview)
+        return;
 
     m_files.move(from, to);
 
@@ -468,18 +601,8 @@ QVariantList PdfAppController::watermarkLayoutItems(const QString &text, int cou
 
 
 
-namespace {
-
-QString resolveInputToPdf(PdfEngine &engine, const QString &path, QTemporaryDir *tempDir,
-                          int *tempSerial, QString *error)
-{
-    return engine.resolveToPdfPath(path, tempDir, tempSerial, error);
-}
-
-} // namespace
-
 void PdfAppController::runCurrentAction(int optionValue, const QString &extraText,
-                                     const QString &extraColor)
+                                     const QString &extraColor, const QString &pageRangeText)
 {
     if (m_busy)
         return;
@@ -507,13 +630,18 @@ void PdfAppController::runCurrentAction(int optionValue, const QString &extraTex
     switch (m_currentTab) {
 
     case 0: {
+        const QString input = activePreviewPath(m_preview, m_files);
+        if (input.isEmpty()) {
+            fail(QStringLiteral("No files"));
+            return;
+        }
         bool rangeOk = true;
-        const QString range = PdfEngine::normalizePageRange(pageRange(paths.first()), &rangeOk);
+        const QString range =
+            PdfEngine::normalizePageRange(resolvedPageRangeText(input, pageRangeText), &rangeOk);
         if (!rangeOk) {
             fail(invalidRangeMsg);
             return;
         }
-        const QString input = paths.first();
         const QString defaultBase = QFileInfo(input).completeBaseName();
         const QString outDir = browseOutputDir(defaultBase, QStringLiteral("split"));
         if (outDir.isEmpty())
@@ -547,7 +675,7 @@ void PdfAppController::runCurrentAction(int optionValue, const QString &extraTex
         ranges.reserve(paths.size());
         for (const QString &path : paths) {
             bool rangeOk = true;
-            ranges.append(PdfEngine::normalizePageRange(pageRange(path), &rangeOk));
+            ranges.append(PdfEngine::normalizePageRange(pageRange(resolvePathKey(path)), &rangeOk));
             if (!rangeOk) {
                 fail(invalidRangeMsg);
                 return;
@@ -575,17 +703,22 @@ void PdfAppController::runCurrentAction(int optionValue, const QString &extraTex
     }
 
     case 2: {
+        const QString input = activePreviewPath(m_preview, m_files);
+        if (input.isEmpty()) {
+            fail(QStringLiteral("No files"));
+            return;
+        }
         bool rangeOk = true;
-        const QString range = PdfEngine::normalizePageRange(pageRange(paths.first()), &rangeOk);
+        const QString range =
+            PdfEngine::normalizePageRange(resolvedPageRangeText(input, pageRangeText), &rangeOk);
         if (!rangeOk) {
             fail(invalidRangeMsg);
             return;
         }
         const QString out = browseOutputFile(
-            QFileInfo(paths.first()).completeBaseName() + QStringLiteral("_rotated.pdf"));
+            QFileInfo(input).completeBaseName() + QStringLiteral("_rotated.pdf"));
         if (out.isEmpty())
             return;
-        const QString input = paths.first();
         outputPath = out;
         task = [this, input, out, optionValue, range]() {
             QTemporaryDir tempDir;

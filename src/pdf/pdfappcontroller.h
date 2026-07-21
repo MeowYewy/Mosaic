@@ -30,6 +30,8 @@ class PdfAppController : public QObject
     Q_PROPERTY(bool processing READ processing NOTIFY processingChanged)
     Q_PROPERTY(QVariantMap pageRanges READ pageRanges NOTIFY pageRangesChanged)
     Q_PROPERTY(bool anyPageRangeSet READ anyPageRangeSet NOTIFY pageRangesChanged)
+    Q_PROPERTY(bool maskedPreview READ maskedPreview NOTIFY maskedPreviewChanged)
+    Q_PROPERTY(QStringList sourceFilePaths READ sourceFilePaths NOTIFY sourceFilePathsChanged)
 
 public:
     explicit PdfAppController(PdfThumbProvider *imageProvider = nullptr,
@@ -51,6 +53,8 @@ public:
     bool processing() const { return m_busy; }
     QVariantMap pageRanges() const;
     bool anyPageRangeSet() const;
+    bool maskedPreview() const { return m_maskedPreview; }
+    QStringList sourceFilePaths() const { return m_sourcePaths; }
 
     Q_INVOKABLE void setCurrentTab(int tab);
     Q_INVOKABLE void addFiles(const QStringList &paths);
@@ -69,7 +73,11 @@ public:
     Q_INVOKABLE QString browseOutputDir(const QString &suggestedBase = {},
                                         const QString &exportKind = {});
     Q_INVOKABLE void runCurrentAction(int optionValue = 90, const QString &extraText = {},
-                                      const QString &extraColor = {});
+                                      const QString &extraColor = {},
+                                      const QString &pageRangeText = {});
+    Q_INVOKABLE void applyMaskedPreview(const QStringList &maskedPaths,
+                                        const QStringList &sourcePaths);
+    Q_INVOKABLE void clearMaskedPreview();
     Q_INVOKABLE QVariantList watermarkLayoutItems(const QString &text, int count,
                                                   qreal pageWidth, qreal pageHeight) const;
 
@@ -84,8 +92,11 @@ signals:
     void requestFileDialog(const QString &mode, const QString &filter);
     void actionFinished(bool ok, const QString &message);
     void pageRangesChanged();
+    void maskedPreviewChanged();
+    void sourceFilePathsChanged();
 
 private:
+    QStringList resolvePaths(const QStringList &paths) const;
     void setStatus(const QString &msg);
     void setBusy(bool busy);
     void setProgress(double value);
@@ -99,6 +110,8 @@ private:
 
     void pruneStalePageRanges();
 
+    QString resolvedPageRangeText(const QString &path, const QString &overrideText) const;
+
     PdfFileListModel m_files;
     PdfPreviewModel m_preview;
     QHash<QString, QString> m_pageRanges;
@@ -109,4 +122,6 @@ private:
     bool m_busy = false;
     double m_progress = 0.0;
     int m_currentTab = 0;
+    bool m_maskedPreview = false;
+    QStringList m_sourcePaths;
 };

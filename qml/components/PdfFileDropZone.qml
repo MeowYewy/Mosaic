@@ -7,15 +7,18 @@ Item {
     implicitHeight: 108
 
     property bool dragActive: FileDropBridge.dragActive
-    property string hintText: Theme.tr("dropHint")
+    property string hintText: PdfController.maskedPreview
+                              ? Theme.tr("maskedPreviewLockedHint")
+                              : Theme.tr("dropHint")
     property int incomingCount: FileDropBridge.dragFileCount
+    property bool locked: PdfController.maskedPreview
 
     readonly property real dragScale: dragActive ? 1.025 : 1.0
 
     Connections {
         target: FileDropBridge
         function onFilesDropped(paths) {
-            if (paths.length > 0)
+            if (paths.length > 0 && !dropHost.locked)
                 dropPulse.restart()
         }
     }
@@ -56,6 +59,7 @@ Item {
         border.width: 1
         scale: dropHost.dragScale
         transformOrigin: Item.Center
+        opacity: dropHost.locked ? 0.55 : 1
 
         Behavior on color { ColorAnimation { duration: Theme.animNormal } }
         Behavior on scale {
@@ -95,6 +99,7 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: Theme.tr("browse")
                 highlighted: true
+                enabled: !dropHost.locked
                 onClicked: PdfController.browseAndAddFiles()
             }
         }

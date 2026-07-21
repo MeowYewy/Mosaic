@@ -8,32 +8,6 @@
 #include <QPageSize>
 #include <QFileInfo>
 
-static QVector<QImage> normalizeExportWidths(const QVector<QImage> &pages)
-{
-    int maxWidth = 0;
-    for (const QImage &img : pages) {
-        if (!img.isNull())
-            maxWidth = qMax(maxWidth, img.width());
-    }
-    if (maxWidth <= 0)
-        return pages;
-
-    QVector<QImage> out;
-    out.reserve(pages.size());
-    for (const QImage &img : pages) {
-        if (img.isNull()) {
-            out.append(img);
-            continue;
-        }
-        if (img.width() >= maxWidth) {
-            out.append(img);
-            continue;
-        }
-        out.append(img.scaledToWidth(maxWidth, Qt::SmoothTransformation));
-    }
-    return out;
-}
-
 static void pixelateRect(QImage &img, const QRect &rect, int block = 12)
 {
     const QRect bounds = rect.intersected(img.rect());
@@ -93,10 +67,12 @@ QImage MosaicEngine::apply(const QImage &source,
     return out;
 }
 
-bool MosaicEngine::exportPages(const QVector<QImage> &pages, const QString &outputPath)
+bool MosaicEngine::exportPages(const QVector<QImage> &pages, const QString &outputPath, int dpi)
 {
     if (pages.isEmpty() || outputPath.isEmpty())
         return false;
+
+    const int layoutDpi = dpi > 0 ? dpi : DocumentLoader::kExportDpi;
 
     const QFileInfo info(outputPath);
     const QString ext = info.suffix().toLower();
@@ -117,16 +93,11 @@ bool MosaicEngine::exportPages(const QVector<QImage> &pages, const QString &outp
         return ok;
     }
 
-    // Normalize page widths so mixed image/PDF sources appear the same width in PDF.
-    const QVector<QImage> normalized = normalizeExportWidths(pages);
-
     // Each PDF page matches the source image's aspect ratio and maps pixels 1:1
     // at the render DPI, so no resampling blur is introduced.
-    constexpr int kDpi = DocumentLoader::kRenderDpi;
-
-    auto layoutForImage = [](const QImage &img) {
-        const QPageSize size(QSizeF(img.width() * 72.0 / kDpi,
-                                    img.height() * 72.0 / kDpi),
+    auto layoutForImage = [layoutDpi](const QImage &img) {
+        const QPageSize size(QSizeF(img.width() * 72.0 / layoutDpi,
+                                    img.height() * 72.0 / layoutDpi),
                              QPageSize::Point, QString(), QPageSize::ExactMatch);
         QPageLayout layout(size, QPageLayout::Portrait, QMarginsF(0, 0, 0, 0));
         layout.setMode(QPageLayout::FullPageMode);
@@ -134,9 +105,9 @@ bool MosaicEngine::exportPages(const QVector<QImage> &pages, const QString &outp
     };
 
     QPdfWriter writer(outputPath);
-    writer.setTitle(QStringLiteral("Mosaic Export"));
-    writer.setResolution(kDpi);
-    writer.setPageLayout(layoutForImage(normalized.first()));
+    writer.setTitle(QStringLiteral("Mask Studio Export"));
+    writer.setResolution(layoutDpi);
+    writer.setPageLayout(layoutForImage(pages.first()));
 
     QPainter painter;
     if (!painter.begin(&writer))
@@ -144,8 +115,8 @@ bool MosaicEngine::exportPages(const QVector<QImage> &pages, const QString &outp
     // No smoothing — 1:1 pixel copy preserves source sharpness.
     painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
 
-    for (int i = 0; i < normalized.size(); ++i) {
-        const QImage &img = normalized.at(i);
+    for (int i = 0; i < pages.size(); ++i) {
+        const QImage &img = pages.at(i);
         if (i > 0) {
             writer.setPageLayout(layoutForImage(img));
             writer.newPage();
