@@ -69,16 +69,31 @@ QString imageToPdf(const QString &input, const QString &outputPath)
     if (QFile::exists(outputPath) && !QFile::remove(outputPath))
         return QStringLiteral("Cannot overwrite output");
 
+    constexpr int kDpi = 150;
+    const qreal standardWidthPt =
+        QPageSize(QPageSize::A4).size(QPageSize::Point).width();
+    const QSizeF pagePoints(standardWidthPt,
+                            standardWidthPt * image.height() / image.width());
+    const QPageSize pageSize(pagePoints, QPageSize::Point,
+                             QString(), QPageSize::ExactMatch);
+    QPageLayout pageLayout(pageSize, QPageLayout::Portrait,
+                           QMarginsF(0, 0, 0, 0));
+    pageLayout.setMode(QPageLayout::FullPageMode);
+
     QPdfWriter writer(outputPath);
-    writer.setPageSize(QPageSize(QPageSize::A4));
-    writer.setResolution(150);
+    writer.setResolution(kDpi);
+    writer.setPageLayout(pageLayout);
 
     QPainter painter(&writer);
     if (!painter.isActive())
         return QStringLiteral("Cannot create PDF for: %1").arg(input);
 
-    const QRect target(0, 0, writer.width(), writer.height());
-    painter.drawImage(target, image.scaled(target.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    // Keep image pages visually consistent with common PDF/Word pages: use A4
+    // width and derive the page height from the image ratio. The page and image
+    // therefore have the same aspect ratio, so this is a single proportional
+    // scale with no cropping, padding, or second-pass distortion.
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter.drawImage(QRect(0, 0, writer.width(), writer.height()), image);
     painter.end();
     return {};
 }

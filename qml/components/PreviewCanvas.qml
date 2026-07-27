@@ -20,7 +20,7 @@ Rectangle {
     property real draftW: 0
     property real draftH: 0
 
-    // Live edit state in normalized coords — avoids breaking Item bindings on drag/resize.
+    // Live edit state in normalized coords 鈥?avoids breaking Item bindings on drag/resize.
     property int editRegionId: -1
     property real editRx: 0
     property real editRy: 0
@@ -68,7 +68,7 @@ Rectangle {
         return "image://preview/" + AppController.currentPage + "/" + mode + "/" + AppController.previewToken
     }
 
-    // previewToken bumps when pages finish loading — re-evaluate readiness
+    // previewToken bumps when pages finish loading 鈥?re-evaluate readiness
     readonly property bool currentPageReady: {
         const _token = AppController.previewToken
         return AppController.isPageLoaded(AppController.currentPage)
@@ -219,7 +219,7 @@ Rectangle {
                 y: pageLayer.offsetY
                 width: pageLayer.paintW
                 height: pageLayer.paintH
-                fillMode: Image.Stretch
+                fillMode: Image.PreserveAspectFit
                 smooth: true
                 mipmap: true
                 asynchronous: true
@@ -280,7 +280,7 @@ Rectangle {
                     Rectangle {
                         anchors.fill: parent
                         color: source === "fixed" ? "#6366F133"
-                              : (source === "manual" ? Theme.maskManualFill : "#F59E0B55")
+                              : (source === "manual" ? Theme.maskManualFill : Theme.maskAutoFill)
                         border.width: isSelected ? 2 : 1
                         border.color: source === "fixed" ? "#6366F1"
                                     : (source === "manual" ? Theme.maskManual : Theme.maskAuto)
@@ -504,7 +504,7 @@ Rectangle {
         }
     }
 
-    // Busy overlay while loading (not during export — export keeps preview interactive)
+    // Busy overlay while loading (not during export 鈥?export keeps preview interactive)
     Rectangle {
         anchors.fill: parent
         radius: parent.radius

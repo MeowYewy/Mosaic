@@ -6,6 +6,7 @@ import ProjectO
 Rectangle {
     id: header
     color: Theme.surface
+    clip: false
 
     signal menuRequested(Item anchor)
 
@@ -35,21 +36,23 @@ Rectangle {
             color: Theme.text
         }
 
-        Item { Layout.fillWidth: true }
+        Item { Layout.fillWidth: true; Layout.minimumWidth: 8 }
 
         Text {
             Layout.alignment: Qt.AlignVCenter
+            Layout.maximumWidth: 420
             text: Theme.tr("devDisclaimer")
             font: Theme.captionFont
             color: Theme.textSecondary
-            elide: Text.ElideRight
-            Layout.maximumWidth: 260
+            wrapMode: Text.Wrap
+            horizontalAlignment: Text.AlignRight
         }
 
         Item {
             Layout.preferredWidth: 36
             Layout.preferredHeight: 36
             Layout.topMargin: UpdateChecker.hasUpdate ? 4 : 0
+            clip: false
 
             ToolButton {
                 id: menuBtn
@@ -78,7 +81,7 @@ Rectangle {
                 anchors.leftMargin: -9
                 anchors.topMargin: -5
                 visible: UpdateChecker.hasUpdate
-                z: 1
+                z: 10
             }
         }
     }

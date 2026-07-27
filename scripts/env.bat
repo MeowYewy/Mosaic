@@ -46,6 +46,11 @@ if not defined INNO_SETUP_DIR (
         set "INNO_SETUP_DIR=%LOCALAPPDATA%\Programs\Inno Setup 6"
     )
 )
+if not defined INNO_SETUP_DIR (
+    if exist "D:\Inno Setup 6\ISCC.exe" (
+        set "INNO_SETUP_DIR=D:\Inno Setup 6"
+    )
+)
 
 if not defined QT_DIR (
     echo [env.bat] ERROR: Qt not found. Set QT_DIR.

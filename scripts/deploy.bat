@@ -59,12 +59,8 @@ if exist "%BUILD_DIR%\tools\poppler\pdftoppm.exe" (
     xcopy /E /I /Y /Q "%BUILD_DIR%\tools\poppler" "%DIST_DIR%\tools\poppler" >nul
 ) else if exist "%PROJECT_ROOT%\tools\poppler\pdftoppm.exe" (
     xcopy /E /I /Y /Q "%PROJECT_ROOT%\tools\poppler" "%DIST_DIR%\tools\poppler" >nul
-) else if exist "%PROJECT_ROOT%\..\ProjectP\desktop-qt\tools\poppler\pdftoppm.exe" (
-    xcopy /E /I /Y /Q "%PROJECT_ROOT%\..\ProjectP\desktop-qt\tools\poppler" "%DIST_DIR%\tools\poppler" >nul
-) else if exist "D:\TechG\ProjectP\desktop-qt\tools\poppler\pdftoppm.exe" (
-    xcopy /E /I /Y /Q "D:\TechG\ProjectP\desktop-qt\tools\poppler" "%DIST_DIR%\tools\poppler" >nul
 ) else (
-    echo WARNING: tools\poppler not found - PDF preview may fail.
+    echo WARNING: tools\poppler not found — run setup-poppler.bat then Rebuild, or PDF preview may stretch on rotated pages.
 )
 
 echo.

@@ -12,6 +12,17 @@ struct OcrWord {
     float confidence = 0.f;
 };
 
+struct OcrRecognizeOptions {
+    bool fastMode = false;
+    bool headerFooterBands = false;
+    bool topFormBand = false;
+    bool footerBand = false;
+    qreal topFormBandRatio = 0.65;
+    qreal footerBandRatio = 0.18;
+    int maxDimension = 4000;
+    int minWordsForFastExit = 10;
+};
+
 class OcrEngine
 {
 public:
@@ -20,8 +31,11 @@ public:
     static QString tessdataPath();
 
     // Recognize with chi_sim+eng for mixed Chinese/English documents.
-    static QVector<OcrWord> recognize(const QImage &image, QString *errorOut = nullptr);
+    static QVector<OcrWord> recognize(const QImage &image, QString *errorOut = nullptr,
+                                      const OcrRecognizeOptions &options = {});
 
 private:
     static QVector<OcrWord> parseTsv(const QString &tsv, int imgW, int imgH);
+    static QVector<OcrWord> recognizeScaled(const QImage &work, qreal scaleBack,
+                                            QString *errorOut, const OcrRecognizeOptions &options);
 };

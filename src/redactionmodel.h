@@ -13,6 +13,7 @@ struct RedactionRegion {
     QString kind;         // idcard / phone / name / manual / fixed / other
     QString source;       // auto / manual / fixed
     QString label;
+    QString content;      // recognized text for auto (e.g. patient name)
     QString filePath;     // non-empty for source=="fixed" (all pages of this file)
 };
 
@@ -20,6 +21,7 @@ class RedactionModel : public QAbstractListModel
 {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY countChanged)
+    Q_PROPERTY(int autoCount READ autoCount NOTIFY countChanged)
     Q_PROPERTY(int selectedId READ selectedId WRITE setSelectedId NOTIFY selectedIdChanged)
     Q_PROPERTY(int pageFilter READ pageFilter NOTIFY pageFilterChanged)
 
@@ -34,6 +36,7 @@ public:
         KindRole,
         SourceRole,
         LabelRole,
+        ContentRole,
         SelectedRole
     };
 
@@ -44,6 +47,7 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     int count() const { return visibleIndices().size(); }
+    int autoCount() const;
     int selectedId() const { return m_selectedId; }
     void setSelectedId(int id);
     int pageFilter() const { return m_pageFilter; }

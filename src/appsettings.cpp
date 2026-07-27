@@ -1,11 +1,100 @@
 #include "appsettings.h"
 
+#include "aimarkengine.h"
+#include "privacyredactionpolicy.h"
+#include "securestorage.h"
+
 #include <QDir>
 #include <QFileInfo>
 #include <QHash>
 #include <QSettings>
-#include <QStandardPaths>
-#include <QCoreApplication>
+
+namespace {
+
+QString normalizeAiApiKey(const QString &raw)
+{
+    QString key = raw.trimmed();
+    if (key.startsWith(QStringLiteral("Bearer "), Qt::CaseInsensitive))
+        key = key.mid(7).trimmed();
+    if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith('\'') && key.endsWith('\'')))
+        key = key.mid(1, key.size() - 2).trimmed();
+    return key;
+}
+
+} // namespace
+
+QString AppSettings::activeAiKeySlot() const
+{
+    if (m_aiMarkMode == QLatin1String("qwen_ocr"))
+        return QStringLiteral("qwen_ocr");
+    if (m_aiApiBase.contains(QStringLiteral("moonshot"), Qt::CaseInsensitive))
+        return QStringLiteral("text_kimi");
+    return QStringLiteral("text_qwen");
+}
+
+QString AppSettings::aiApiKeyForSlot(const QString &slot) const
+{
+    if (slot == QLatin1String("text_kimi"))
+        return m_aiApiKeyTextKimi;
+    if (slot == QLatin1String("text_qwen"))
+        return m_aiApiKeyTextQwen;
+    if (slot == QLatin1String("qwen_ocr"))
+        return m_aiApiKeyQwenOcr;
+    return QString();
+}
+
+void AppSettings::setAiApiKeyForSlot(const QString &slot, const QString &key)
+{
+    const QString normalized = normalizeAiApiKey(key);
+    QSettings settings;
+    if (slot == QLatin1String("text_kimi")) {
+        if (m_aiApiKeyTextKimi == normalized)
+            return;
+        m_aiApiKeyTextKimi = normalized;
+        SecureStorage::saveSecret(settings, QStringLiteral("aiApiKeyTextKimi"), m_aiApiKeyTextKimi);
+    } else if (slot == QLatin1String("text_qwen")) {
+        if (m_aiApiKeyTextQwen == normalized)
+            return;
+        m_aiApiKeyTextQwen = normalized;
+        SecureStorage::saveSecret(settings, QStringLiteral("aiApiKeyTextQwen"), m_aiApiKeyTextQwen);
+    } else if (slot == QLatin1String("qwen_ocr")) {
+        if (m_aiApiKeyQwenOcr == normalized)
+            return;
+        m_aiApiKeyQwenOcr = normalized;
+        SecureStorage::saveSecret(settings, QStringLiteral("aiApiKeyQwenOcr"), m_aiApiKeyQwenOcr);
+    } else {
+        return;
+    }
+    emit aiSettingsChanged();
+}
+
+void AppSettings::migrateLegacyAiApiKey(QSettings &s, const QString &legacyKey)
+{
+    if (legacyKey.isEmpty())
+        return;
+
+    const QString slot = activeAiKeySlot();
+    if (!aiApiKeyForSlot(slot).isEmpty())
+        return;
+
+    const QString normalized = normalizeAiApiKey(legacyKey);
+    if (slot == QLatin1String("text_kimi"))
+        m_aiApiKeyTextKimi = normalized;
+    else if (slot == QLatin1String("text_qwen"))
+        m_aiApiKeyTextQwen = normalized;
+    else if (slot == QLatin1String("qwen_ocr"))
+        m_aiApiKeyQwenOcr = normalized;
+    else
+        return;
+
+    if (slot == QLatin1String("text_kimi"))
+        SecureStorage::saveSecret(s, QStringLiteral("aiApiKeyTextKimi"), m_aiApiKeyTextKimi);
+    else if (slot == QLatin1String("text_qwen"))
+        SecureStorage::saveSecret(s, QStringLiteral("aiApiKeyTextQwen"), m_aiApiKeyTextQwen);
+    else
+        SecureStorage::saveSecret(s, QStringLiteral("aiApiKeyQwenOcr"), m_aiApiKeyQwenOcr);
+    s.remove(QStringLiteral("aiApiKey"));
+}
 
 AppSettings::AppSettings(QObject *parent)
     : QObject(parent)
@@ -15,6 +104,26 @@ AppSettings::AppSettings(QObject *parent)
     m_theme = s.value(QStringLiteral("theme"), QStringLiteral("light")).toString();
     m_customFilePicker = s.value(QStringLiteral("customFilePicker"), true).toBool();
     m_modeTransition = s.value(QStringLiteral("modeTransition"), true).toBool();
+    m_aiApiBase = s.value(QStringLiteral("aiApiBase"), QStringLiteral("https://api.moonshot.cn/v1"))
+                      .toString()
+                      .trimmed();
+    m_aiApiKeyTextKimi =
+        normalizeAiApiKey(SecureStorage::loadSecret(s, QStringLiteral("aiApiKeyTextKimi")));
+    m_aiApiKeyTextQwen =
+        normalizeAiApiKey(SecureStorage::loadSecret(s, QStringLiteral("aiApiKeyTextQwen")));
+    m_aiApiKeyQwenOcr =
+        normalizeAiApiKey(SecureStorage::loadSecret(s, QStringLiteral("aiApiKeyQwenOcr")));
+    m_aiModel = s.value(QStringLiteral("aiModel"), QStringLiteral("moonshot-v1-8k")).toString();
+    m_aiMarkMode = s.value(QStringLiteral("aiMarkMode"), QStringLiteral("text")).toString();
+    m_aiOcrCloudMode = s.value(QStringLiteral("aiOcrCloudMode"), QStringLiteral("single")).toString();
+    if (m_aiOcrCloudMode != QLatin1String("dual"))
+        m_aiOcrCloudMode = QStringLiteral("single");
+    m_privacyPolicy = PrivacyRedactionPolicy::fromSettings();
+    migrateLegacyAiApiKey(s,
+                          normalizeAiApiKey(SecureStorage::loadSecret(s, QStringLiteral("aiApiKey"))));
+    SecureStorage::upgradePlaintextSecret(s, QStringLiteral("aiApiKeyTextKimi"), m_aiApiKeyTextKimi);
+    SecureStorage::upgradePlaintextSecret(s, QStringLiteral("aiApiKeyTextQwen"), m_aiApiKeyTextQwen);
+    SecureStorage::upgradePlaintextSecret(s, QStringLiteral("aiApiKeyQwenOcr"), m_aiApiKeyQwenOcr);
 }
 
 void AppSettings::setLanguage(const QString &lang)
@@ -75,6 +184,141 @@ void AppSettings::setModeTransition(bool on)
     m_modeTransition = on;
     QSettings().setValue(QStringLiteral("modeTransition"), m_modeTransition);
     emit modeTransitionChanged();
+}
+
+QString AppSettings::aiApiKey() const
+{
+    return aiApiKeyForSlot(activeAiKeySlot());
+}
+
+bool AppSettings::aiConfigured() const
+{
+    const QString key = aiApiKey();
+    if (m_aiMarkMode == QLatin1String("qwen_ocr"))
+        return !key.trimmed().isEmpty();
+    AiMarkConfig config;
+    config.apiBaseUrl = m_aiApiBase;
+    config.apiKey = key;
+    config.model = m_aiModel;
+    return AiMarkEngine::isConfigured(config);
+}
+
+void AppSettings::setAiApiBase(const QString &value)
+{
+    const QString trimmed = value.trimmed();
+    if (m_aiApiBase == trimmed)
+        return;
+    m_aiApiBase = trimmed;
+    QSettings().setValue(QStringLiteral("aiApiBase"), m_aiApiBase);
+    emit aiSettingsChanged();
+}
+
+void AppSettings::setAiApiKey(const QString &value)
+{
+    setAiApiKeyForSlot(activeAiKeySlot(), value);
+}
+
+void AppSettings::setAiModel(const QString &value)
+{
+    const QString trimmed = value.trimmed();
+    if (m_aiModel == trimmed)
+        return;
+    m_aiModel = trimmed;
+    QSettings().setValue(QStringLiteral("aiModel"), m_aiModel);
+    emit aiSettingsChanged();
+}
+
+void AppSettings::setAiMarkMode(const QString &value)
+{
+    const QString trimmed = value.trimmed().toLower();
+    const QString mode = trimmed == QLatin1String("qwen_ocr") ? QStringLiteral("qwen_ocr")
+                                                              : QStringLiteral("text");
+    if (m_aiMarkMode == mode)
+        return;
+    m_aiMarkMode = mode;
+    QSettings().setValue(QStringLiteral("aiMarkMode"), m_aiMarkMode);
+    emit aiSettingsChanged();
+}
+
+void AppSettings::setAiOcrCloudMode(const QString &value)
+{
+    const QString trimmed = value.trimmed().toLower();
+    const QString mode = trimmed == QLatin1String("dual") ? QStringLiteral("dual")
+                                                          : QStringLiteral("single");
+    if (m_aiOcrCloudMode == mode)
+        return;
+    m_aiOcrCloudMode = mode;
+    QSettings().setValue(QStringLiteral("aiOcrCloudMode"), m_aiOcrCloudMode);
+    emit aiSettingsChanged();
+}
+
+bool AppSettings::privacyMaskEnabled(const QString &key) const
+{
+    return m_privacyPolicy.enabledForKey(key);
+}
+
+void AppSettings::setPrivacyMaskEnabled(const QString &key, bool enabled)
+{
+    PrivacyRedactionPolicy next = m_privacyPolicy;
+    next.setForKey(key, enabled);
+    if (next.maskName == m_privacyPolicy.maskName && next.maskGender == m_privacyPolicy.maskGender
+        && next.maskAge == m_privacyPolicy.maskAge
+        && next.maskHospital == m_privacyPolicy.maskHospital
+        && next.maskDoctor == m_privacyPolicy.maskDoctor
+        && next.maskInpatientId == m_privacyPolicy.maskInpatientId
+        && next.maskBedNumber == m_privacyPolicy.maskBedNumber
+        && next.maskIdCard == m_privacyPolicy.maskIdCard
+        && next.idCardDigitMask == m_privacyPolicy.idCardDigitMask
+        && next.maskPhone == m_privacyPolicy.maskPhone
+        && next.maskAddress == m_privacyPolicy.maskAddress
+        && next.maskRecordIds == m_privacyPolicy.maskRecordIds
+        && next.maskBank == m_privacyPolicy.maskBank) {
+        return;
+    }
+    m_privacyPolicy = next;
+    m_privacyPolicy.saveToSettings();
+    ++m_privacyPolicyRevision;
+    emit privacyPolicyChanged();
+}
+
+bool AppSettings::idCardDigitEnabled(int digit) const
+{
+    return m_privacyPolicy.idCardDigitMasked(digit);
+}
+
+void AppSettings::setIdCardDigitEnabled(int digit, bool enabled)
+{
+    PrivacyRedactionPolicy next = m_privacyPolicy;
+    next.setIdCardDigitMasked(digit, enabled);
+    if (next.idCardDigitMask == m_privacyPolicy.idCardDigitMask)
+        return;
+    m_privacyPolicy = next;
+    m_privacyPolicy.saveToSettings();
+    ++m_privacyPolicyRevision;
+    emit privacyPolicyChanged();
+}
+
+void AppSettings::applyAiPreset(const QString &presetId)
+{
+    const QString id = presetId.trimmed().toLower();
+    if (id == QLatin1String("kimi") || id == QLatin1String("moonshot")) {
+        setAiMarkMode(QStringLiteral("text"));
+        setAiApiBase(QStringLiteral("https://api.moonshot.cn/v1"));
+        setAiModel(QStringLiteral("moonshot-v1-8k"));
+        return;
+    }
+    if (id == QLatin1String("qwen") || id == QLatin1String("dashscope")) {
+        setAiMarkMode(QStringLiteral("text"));
+        setAiApiBase(QStringLiteral("https://dashscope.aliyuncs.com/compatible-mode/v1"));
+        setAiModel(QStringLiteral("qwen-plus"));
+        return;
+    }
+    if (id == QLatin1String("qwen_ocr") || id == QLatin1String("qwen-ocr")
+        || id == QLatin1String("qwenocr")) {
+        setAiMarkMode(QStringLiteral("qwen_ocr"));
+        setAiApiBase(QStringLiteral("https://dashscope.aliyuncs.com/api/v1"));
+        setAiModel(QStringLiteral("qwen3.5-ocr"));
+    }
 }
 
 QString AppSettings::lastOutputDir() const
@@ -377,6 +621,162 @@ QString AppSettings::trKey(const QString &key) const
             {QStringLiteral("zh_CN"), QStringLiteral("按内容")},
             {QStringLiteral("en"), QStringLiteral("By Content")},
         }},
+        {QStringLiteral("aiMark"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("AI")},
+            {QStringLiteral("en"), QStringLiteral("AI")},
+        }},
+        {QStringLiteral("aiMarkAnalyzing"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("AI 分析中…")},
+            {QStringLiteral("en"), QStringLiteral("AI analyzing…")},
+        }},
+        {QStringLiteral("aiNotConfigured"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("请先在设置中配置 AI API 与模型")},
+            {QStringLiteral("en"), QStringLiteral("Configure AI API and model in Settings first")},
+        }},
+        {QStringLiteral("aiMarkDone"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("AI 已标记 %1 处")},
+            {QStringLiteral("en"), QStringLiteral("AI marked %1 region(s)")},
+        }},
+        {QStringLiteral("aiMarkResults"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("AI 识别结果")},
+            {QStringLiteral("en"), QStringLiteral("AI detections")},
+        }},
+        {QStringLiteral("aiMarkContentPrefix"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("识别内容：")},
+            {QStringLiteral("en"), QStringLiteral("Detected: ")},
+        }},
+        {QStringLiteral("aiMarkNone"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("AI 未发现需脱敏内容")},
+            {QStringLiteral("en"), QStringLiteral("AI found nothing to redact")},
+        }},
+        {QStringLiteral("aiMarkFailed"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("AI 分析失败：%1")},
+            {QStringLiteral("en"), QStringLiteral("AI analysis failed: %1")},
+        }},
+        {QStringLiteral("aiAuthFailed"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("API Key 无效或与 API 地址不匹配。Kimi 用 api.moonshot.cn/v1；千问用 dashscope.aliyuncs.com/compatible-mode/v1。Key 仅填 sk- 开头，不要带 Bearer")},
+            {QStringLiteral("en"), QStringLiteral("Invalid API key or base URL. Kimi: api.moonshot.cn/v1. Qwen: dashscope.aliyuncs.com/compatible-mode/v1. Paste sk-... only.")},
+        }},
+        {QStringLiteral("settingAiSection"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("AI 脱敏")},
+            {QStringLiteral("en"), QStringLiteral("AI redaction")},
+        }},
+        {QStringLiteral("settingAiApiBase"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("API 地址")},
+            {QStringLiteral("en"), QStringLiteral("API base URL")},
+        }},
+        {QStringLiteral("settingAiApiKey"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("API Key")},
+            {QStringLiteral("en"), QStringLiteral("API Key")},
+        }},
+        {QStringLiteral("settingAiModel"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("模型")},
+            {QStringLiteral("en"), QStringLiteral("Model")},
+        }},
+        {QStringLiteral("settingAiOcrCloud"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("OCR 调用")},
+            {QStringLiteral("en"), QStringLiteral("OCR calls")},
+        }},
+        {QStringLiteral("settingAiOcrCloudSingle"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("单云端")},
+            {QStringLiteral("en"), QStringLiteral("Single")},
+        }},
+        {QStringLiteral("settingAiOcrCloudDual"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("双云端")},
+            {QStringLiteral("en"), QStringLiteral("Dual")},
+        }},
+        {QStringLiteral("settingAiMode"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("识别方式")},
+            {QStringLiteral("en"), QStringLiteral("Mode")},
+        }},
+        {QStringLiteral("settingAiModeText"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("文本模型")},
+            {QStringLiteral("en"), QStringLiteral("Text LLM")},
+        }},
+        {QStringLiteral("settingAiModeOcr"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("千问 OCR")},
+            {QStringLiteral("en"), QStringLiteral("Qwen OCR")},
+        }},
+        {QStringLiteral("settingAiTextProvider"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("文本服务")},
+            {QStringLiteral("en"), QStringLiteral("Provider")},
+        }},
+        {QStringLiteral("settingAiPreset"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("快速预设")},
+            {QStringLiteral("en"), QStringLiteral("Quick preset")},
+        }},
+        {QStringLiteral("settingAiQwen"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("千问文本")},
+            {QStringLiteral("en"), QStringLiteral("Qwen text")},
+        }},
+        {QStringLiteral("settingAiQwenOcr"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("千问 OCR")},
+            {QStringLiteral("en"), QStringLiteral("Qwen OCR")},
+        }},
+        {QStringLiteral("settingPrivacySection"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("脱敏项目")},
+            {QStringLiteral("en"), QStringLiteral("Redaction items")},
+        }},
+        {QStringLiteral("settingPrivacyHint"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("勾选的项目会在 AI 脱敏时自动打码；未勾选则保留。")},
+            {QStringLiteral("en"), QStringLiteral("Checked items are redacted by AI marking; unchecked items are kept.")},
+        }},
+        {QStringLiteral("privacyMaskName"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("姓名")},
+            {QStringLiteral("en"), QStringLiteral("Name")},
+        }},
+        {QStringLiteral("privacyMaskGender"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("性别")},
+            {QStringLiteral("en"), QStringLiteral("Gender")},
+        }},
+        {QStringLiteral("privacyMaskAge"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("年龄")},
+            {QStringLiteral("en"), QStringLiteral("Age")},
+        }},
+        {QStringLiteral("privacyMaskHospital"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("医院/机构")},
+            {QStringLiteral("en"), QStringLiteral("Hospital")},
+        }},
+        {QStringLiteral("privacyMaskDoctor"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("医生")},
+            {QStringLiteral("en"), QStringLiteral("Doctor")},
+        }},
+        {QStringLiteral("privacyMaskInpatientId"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("住院号")},
+            {QStringLiteral("en"), QStringLiteral("Inpatient ID")},
+        }},
+        {QStringLiteral("privacyMaskBedNumber"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("床号")},
+            {QStringLiteral("en"), QStringLiteral("Bed number")},
+        }},
+        {QStringLiteral("privacyMaskIdCard"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("身份证")},
+            {QStringLiteral("en"), QStringLiteral("ID card")},
+        }},
+        {QStringLiteral("privacyIdCardDigitHint"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("选择要脱敏的位数（1–18，默认全选）")},
+            {QStringLiteral("en"), QStringLiteral("Choose ID digits to mask (1–18, all on by default)")},
+        }},
+        {QStringLiteral("privacyMaskPhone"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("手机号")},
+            {QStringLiteral("en"), QStringLiteral("Phone")},
+        }},
+        {QStringLiteral("privacyMaskAddress"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("住址")},
+            {QStringLiteral("en"), QStringLiteral("Address")},
+        }},
+        {QStringLiteral("privacyMaskRecordIds"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("条码/标本/影像等编号")},
+            {QStringLiteral("en"), QStringLiteral("Barcode & record IDs")},
+        }},
+        {QStringLiteral("privacyMaskBank"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("银行信息")},
+            {QStringLiteral("en"), QStringLiteral("Bank info")},
+        }},
+        {QStringLiteral("aiMarkNoText"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("未能从文档提取文字，无法调用 AI。请确认 OCR 已安装或 PDF 含可选文字层")},
+            {QStringLiteral("en"), QStringLiteral("No extractable text — AI was not called. Check OCR or PDF text layer.")},
+        }},
         {QStringLiteral("contentSortAnalyzing"), {
             {QStringLiteral("zh_CN"), QStringLiteral("正在读取文件内容…")},
             {QStringLiteral("en"), QStringLiteral("Reading file content…")},
@@ -498,8 +898,8 @@ QString AppSettings::trKey(const QString &key) const
             {QStringLiteral("en"), QStringLiteral("All rights reserved")},
         }},
         {QStringLiteral("devDisclaimer"), {
-            {QStringLiteral("zh_CN"), QStringLiteral("开发中内容，不代表最终品质。")},
-            {QStringLiteral("en"), QStringLiteral("Work in progress; not final quality.")},
+            {QStringLiteral("zh_CN"), QStringLiteral("开发及设计早期阶段，可能会运行不稳定及频繁更新。")},
+            {QStringLiteral("en"), QStringLiteral("Early development and design; may be unstable with frequent updates.")},
         }},
         {QStringLiteral("changelog"), {
             {QStringLiteral("zh_CN"), QStringLiteral("更新日志")},

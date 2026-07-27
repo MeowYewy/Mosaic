@@ -48,7 +48,7 @@
 
 - Qt 6.11 + QML + C++
 
-- PDF 预览：poppler（构建时从 ProjectP 复制）
+- PDF 预览：poppler（`setup-poppler.bat` → `tools/poppler/`，构建时复制到 exe 旁）
 
 - OCR：**Tesseract** `chi_sim+eng`（`tools/tesseract/`，可离线）
 

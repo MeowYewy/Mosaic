@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Mosaic VERSION 0.1.2 LANGUAGES CXX)
+project(Mosaic VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -33,6 +33,7 @@ qt_policy(SET QTP0001 NEW)
 set(SOURCES
     src/main.cpp
     src/appsettings.cpp
+    src/securestorage.cpp
     src/appcontroller.cpp
     src/filelistmodel.cpp
     src/redactionmodel.cpp
@@ -45,6 +46,11 @@ set(SOURCES
     src/ocrengine.cpp
     src/pipelinediag.cpp
     src/labreportdetector.cpp
+    src/aimarkengine.cpp
+    src/qwenocrengine.cpp
+    src/privacyredactionpolicy.cpp
+    src/textregionmapper.cpp
+    src/privacyformmapper.cpp
     src/updatechecker.cpp
     src/filedropbridge.cpp
     src/pdf/pdfappcontroller.cpp
@@ -60,6 +66,7 @@ set(SOURCES
 
 set(HEADERS
     src/appsettings.h
+    src/securestorage.h
     src/appcontroller.h
     src/filelistmodel.h
     src/redactionmodel.h
@@ -72,6 +79,11 @@ set(HEADERS
     src/ocrengine.h
     src/pipelinediag.h
     src/labreportdetector.h
+    src/aimarkengine.h
+    src/qwenocrengine.h
+    src/privacyredactionpolicy.h
+    src/textregionmapper.h
+    src/privacyformmapper.h
     src/updatechecker.h
     src/filedropbridge.h
     src/pdf/pdfappcontroller.h
@@ -122,6 +134,8 @@ qt_add_qml_module(Mosaic
         qml/components/AboutDialog.qml
         qml/components/SettingsDialog.qml
         qml/components/SettingsOptionRow.qml
+        qml/components/SettingsTextRow.qml
+        qml/components/SettingsIdCardDigitRow.qml
         qml/components/ShortcutInfoTip.qml
         qml/components/AppLogo.qml
         qml/components/UpdateStatusIcon.qml
@@ -149,6 +163,7 @@ qt_add_qml_module(Mosaic
         qml/components/PickerFilterCombo.qml
         qml/components/FilePickerIconButton.qml
         qml/components/MaskView.qml
+        qml/components/AiMarkResultsPanel.qml
         qml/components/MaskShortcutHandler.qml
         qml/components/ThemeTransitionOverlay.qml
         qml/pages/PageBase.qml
@@ -161,6 +176,7 @@ qt_add_qml_module(Mosaic
     RESOURCES
         resources/logo.svg
         resources/app-icon.png
+        resources/app-icon.ico
         resources/update.json
         resources/changelog.json
         resources/icons/full-screen.svg
@@ -204,6 +220,10 @@ target_link_libraries(Mosaic PRIVATE
     Qt6::Concurrent
     Qt6::Network
 )
+
+if(WIN32)
+    target_link_libraries(Mosaic PRIVATE crypt32)
+endif()
 
 if(TARGET Qt6::Pdf)
     target_link_libraries(Mosaic PRIVATE Qt6::Pdf)
@@ -255,16 +275,13 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/qpdf")
     )
 endif()
 
-# Copy poppler tools from ProjectP if present (optional PDF preview)
-set(PROJECTP_POPPLER "${CMAKE_SOURCE_DIR}/../ProjectP/desktop-qt/tools/poppler")
-if(NOT EXISTS "${PROJECTP_POPPLER}/pdftoppm.exe")
-    set(PROJECTP_POPPLER "D:/TechG/ProjectP/desktop-qt/tools/poppler")
-endif()
-if(EXISTS "${PROJECTP_POPPLER}/pdftoppm.exe")
+# Copy poppler tools if present (run setup-poppler.bat once)
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/poppler/pdftoppm.exe")
     add_custom_command(TARGET Mosaic POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:Mosaic>/tools/poppler"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECTP_POPPLER}" "$<TARGET_FILE_DIR:Mosaic>/tools/poppler"
-        COMMENT "Copy poppler for PDF preview"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/tools/poppler"
+            "$<TARGET_FILE_DIR:Mosaic>/tools/poppler"
+        COMMENT "Copy poppler tools to build output"
     )
 endif()
 

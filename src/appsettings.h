@@ -5,6 +5,10 @@
 #include <QString>
 #include <QStringList>
 
+class QSettings;
+
+#include "privacyredactionpolicy.h"
+
 class AppSettings : public QObject
 {
     Q_OBJECT
@@ -19,6 +23,13 @@ class AppSettings : public QObject
     Q_PROPERTY(QString appName READ appName CONSTANT)
     Q_PROPERTY(bool customFilePicker READ customFilePicker WRITE setCustomFilePicker NOTIFY customFilePickerChanged)
     Q_PROPERTY(bool modeTransition READ modeTransition WRITE setModeTransition NOTIFY modeTransitionChanged)
+    Q_PROPERTY(QString aiApiBase READ aiApiBase NOTIFY aiSettingsChanged)
+    Q_PROPERTY(QString aiApiKey READ aiApiKey NOTIFY aiSettingsChanged)
+    Q_PROPERTY(QString aiModel READ aiModel NOTIFY aiSettingsChanged)
+    Q_PROPERTY(QString aiMarkMode READ aiMarkMode NOTIFY aiSettingsChanged)
+    Q_PROPERTY(QString aiOcrCloudMode READ aiOcrCloudMode NOTIFY aiSettingsChanged)
+    Q_PROPERTY(bool aiConfigured READ aiConfigured NOTIFY aiSettingsChanged)
+    Q_PROPERTY(int privacyPolicyRevision READ privacyPolicyRevision NOTIFY privacyPolicyChanged)
 
 public:
     explicit AppSettings(QObject *parent = nullptr);
@@ -32,6 +43,14 @@ public:
     bool maskMode() const { return m_maskMode; }
     bool customFilePicker() const { return m_customFilePicker; }
     bool modeTransition() const { return m_modeTransition; }
+    QString aiApiBase() const { return m_aiApiBase; }
+    QString aiApiKey() const;
+    QString aiModel() const { return m_aiModel; }
+    QString aiMarkMode() const { return m_aiMarkMode; }
+    QString aiOcrCloudMode() const { return m_aiOcrCloudMode; }
+    bool aiConfigured() const;
+    int privacyPolicyRevision() const { return m_privacyPolicyRevision; }
+    PrivacyRedactionPolicy privacyPolicy() const { return m_privacyPolicy; }
     QString appVersion() const { return QCoreApplication::applicationVersion(); }
     QString appName() const { return QStringLiteral("Mosaic"); }
 
@@ -41,6 +60,16 @@ public:
     Q_INVOKABLE void setMaskMode(bool on);
     Q_INVOKABLE void setCustomFilePicker(bool on);
     Q_INVOKABLE void setModeTransition(bool on);
+    Q_INVOKABLE void setAiApiBase(const QString &value);
+    Q_INVOKABLE void setAiApiKey(const QString &value);
+    Q_INVOKABLE void setAiModel(const QString &value);
+    Q_INVOKABLE void setAiMarkMode(const QString &value);
+    Q_INVOKABLE void setAiOcrCloudMode(const QString &value);
+    Q_INVOKABLE void applyAiPreset(const QString &presetId);
+    Q_INVOKABLE bool privacyMaskEnabled(const QString &key) const;
+    Q_INVOKABLE void setPrivacyMaskEnabled(const QString &key, bool enabled);
+    Q_INVOKABLE bool idCardDigitEnabled(int digit) const;
+    Q_INVOKABLE void setIdCardDigitEnabled(int digit, bool enabled);
     Q_INVOKABLE QString trKey(const QString &key) const;
     Q_INVOKABLE void rememberOutputPath(const QString &fileOrDir);
     Q_INVOKABLE QStringList recentFiles() const;
@@ -57,8 +86,15 @@ signals:
     void maskModeChanged();
     void customFilePickerChanged();
     void modeTransitionChanged();
+    void aiSettingsChanged();
+    void privacyPolicyChanged();
 
 private:
+    QString activeAiKeySlot() const;
+    QString aiApiKeyForSlot(const QString &slot) const;
+    void setAiApiKeyForSlot(const QString &slot, const QString &key);
+    void migrateLegacyAiApiKey(QSettings &s, const QString &legacyKey);
+
     QString m_language = QStringLiteral("zh_CN");
     QString m_theme = QStringLiteral("light");
     int m_languageRevision = 0;
@@ -67,4 +103,13 @@ private:
     bool m_maskMode = false;
     bool m_customFilePicker = true;
     bool m_modeTransition = true;
+    QString m_aiApiBase = QStringLiteral("https://api.openai.com/v1");
+    QString m_aiApiKeyTextKimi;
+    QString m_aiApiKeyTextQwen;
+    QString m_aiApiKeyQwenOcr;
+    QString m_aiModel = QStringLiteral("gpt-4o-mini");
+    QString m_aiMarkMode = QStringLiteral("text");
+    QString m_aiOcrCloudMode = QStringLiteral("single");
+    PrivacyRedactionPolicy m_privacyPolicy;
+    int m_privacyPolicyRevision = 0;
 };

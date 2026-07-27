@@ -19,14 +19,16 @@ Rectangle {
         text: compact ? "New" : Theme.tr("newVersion")
         color: "#FFFFFF"
         font.pixelSize: 11
-        font.family: Theme.uiFontFamily
-        font.weight: Font.Medium
+        font.family: compact ? Theme.uiFontFamily : Theme.mainFont.family
+        font.weight: compact ? Font.Medium : Font.Normal
     }
 
     MouseArea {
         anchors.fill: parent
-        enabled: pill.clickable
-        cursorShape: Qt.PointingHandCursor
+        // Non-clickable pills still absorb hover so the menu button underneath
+        // does not show a pointing-hand cursor (PageCase header "New" is visual only).
+        acceptedButtons: pill.clickable ? Qt.AllButtons : Qt.NoButtons
+        cursorShape: pill.clickable ? Qt.PointingHandCursor : Qt.ArrowCursor
         onClicked: pill.clicked()
     }
 }

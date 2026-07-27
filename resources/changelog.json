@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.2.0",
+    "date": "2026-07-27",
+    "notes": {
+      "zh_CN": "新增 AI 脱敏功能。",
+      "en": "Added AI redaction."
+    }
+  },
+  {
     "version": "0.1.2",
     "date": "2026-07-21",
     "notes": {

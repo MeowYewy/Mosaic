@@ -37,6 +37,17 @@ Item {
         ]
     }
 
+    readonly property bool contentSortBusy: AppController.fileCount > 1
+                                             && (!AppController.contentSortReady
+                                                 || AppController.contentSortRunning)
+
+    readonly property bool aiMarkBusy: AppController.fileCount > 0
+                                        && (AppController.backgroundLoading
+                                            || (AppController.processing
+                                                && AppController.activeTask === ""))
+
+    readonly property bool aiPreviewLoading: aiMarkBusy
+
     Item {
         anchors.fill: parent
         anchors.margins: 12
@@ -103,9 +114,7 @@ Item {
                                 id: contentSortBtn
                                 anchors.fill: parent
                                 text: Theme.tr("sortByContent")
-                                enabled: AppController.fileCount > 1
-                                         && AppController.contentSortReady
-                                         && !AppController.contentSortRunning
+                                enabled: AppController.fileCount > 1 && !maskRoot.contentSortBusy
                                 onClicked: AppController.sortFilesByContent()
                             }
 
@@ -115,7 +124,7 @@ Item {
                                 anchors.bottom: parent.bottom
                                 anchors.margins: 5
                                 height: 2
-                                visible: AppController.fileCount > 1 && !AppController.contentSortReady
+                                visible: maskRoot.contentSortBusy
                                 clip: true
 
                                 Rectangle {
@@ -126,6 +135,50 @@ Item {
                                 Rectangle {
                                     height: parent.height
                                     width: parent.width * Math.max(0.04, AppController.contentSortProgress)
+                                    radius: 1
+                                    color: Theme.accent
+                                }
+                            }
+                        }
+
+                        Item {
+                            Layout.preferredWidth: aiMarkBtn.implicitWidth
+                            Layout.preferredHeight: aiMarkBtn.implicitHeight
+
+                            StyledButton {
+                                id: aiMarkBtn
+                                anchors.fill: parent
+                                text: Theme.tr("aiMark")
+                                enabled: AppController.hasPreview
+                                         && !maskRoot.aiMarkBusy
+                                         && !AppController.processing
+                                         && AppController.activeTask !== "export"
+                                         && AppController.activeTask !== "aiMark"
+                                onClicked: AppController.runAiMarking()
+
+                                StyledToolTip {
+                                    visible: aiMarkBtn.hovered && !AppSettings.aiConfigured
+                                    text: Theme.tr("aiNotConfigured")
+                                }
+                            }
+
+                            Item {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.margins: 5
+                                height: 2
+                                visible: maskRoot.aiPreviewLoading
+                                clip: true
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 1
+                                    color: Theme.dark ? "#1A3D38" : "#D1EAE5"
+                                }
+                                Rectangle {
+                                    height: parent.height
+                                    width: parent.width * Math.max(0.04, AppController.progress)
                                     radius: 1
                                     color: Theme.accent
                                 }
@@ -143,14 +196,21 @@ Item {
                     FileListView {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+                        Layout.minimumHeight: 120
+                    }
+
+                    AiMarkResultsPanel {
+                        Layout.fillWidth: true
                     }
 
                     StyledButton {
                         Layout.fillWidth: true
                         text: Theme.tr("export")
-                        enabled: AppController.hasPreview && !AppController.processing
+                        enabled: AppController.hasPreview
                                  && AppController.activeTask !== "export"
                                  && !AppController.backgroundLoading
+                                 && (!AppController.processing
+                                     || AppController.isPageLoaded(AppController.currentPage))
                         onClicked: AppController.exportRedacted()
                     }
                 }

@@ -4,6 +4,7 @@ build-test/
 cmake-build-*/
 out/
 dist/
+%DIST%/
 *.user
 *.autosave
 CMakeLists.txt.user
@@ -27,3 +28,7 @@ Desktop.ini
 tools/tesseract/tessdata/*.traineddata
 tools/tesseract/*.dll
 tools/tesseract/tesseract.exe
+
+# Poppler (large; copy via setup-poppler.bat)
+tools/poppler-temp/
+tools/poppler-temp.zip

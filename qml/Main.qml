@@ -110,6 +110,7 @@ ApplicationWindow {
             Layout.preferredHeight: (AppSettings.maskMode
                                      && (AppController.backgroundLoading
                                          || AppController.activeTask === "export"
+                                         || AppController.activeTask === "aiMark"
                                          || (AppController.processing
                                              && AppController.activeTask.length === 0))) ? 3 : 0
             visible: Layout.preferredHeight > 0

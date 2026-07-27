@@ -35,9 +35,11 @@ int main(int argc, char *argv[])
     app.setOrganizationName(QStringLiteral("TechG"));
     app.setOrganizationDomain(QStringLiteral("techg.local"));
     app.setApplicationName(QStringLiteral("Mosaic"));
-    app.setApplicationVersion(QStringLiteral("0.1.2"));
+    app.setApplicationVersion(QStringLiteral("0.2.0"));
 
-    QIcon appIcon(QStringLiteral(":/qt/qml/ProjectO/resources/app-icon.png"));
+    QIcon appIcon(QStringLiteral(":/qt/qml/ProjectO/resources/app-icon.ico"));
+    if (appIcon.isNull())
+        appIcon = QIcon(QStringLiteral(":/qt/qml/ProjectO/resources/app-icon.png"));
     if (appIcon.isNull())
         appIcon = QIcon(QStringLiteral(":/qt/qml/ProjectO/resources/logo.svg"));
     app.setWindowIcon(appIcon);

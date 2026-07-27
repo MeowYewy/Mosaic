@@ -93,38 +93,42 @@ bool MosaicEngine::exportPages(const QVector<QImage> &pages, const QString &outp
         return ok;
     }
 
-    // Each PDF page matches the source image's aspect ratio and maps pixels 1:1
-    // at the render DPI, so no resampling blur is introduced.
-    auto layoutForImage = [layoutDpi](const QImage &img) {
-        const QPageSize size(QSizeF(img.width() * 72.0 / layoutDpi,
-                                    img.height() * 72.0 / layoutDpi),
-                             QPageSize::Point, QString(), QPageSize::ExactMatch);
-        QPageLayout layout(size, QPageLayout::Portrait, QMarginsF(0, 0, 0, 0));
-        layout.setMode(QPageLayout::FullPageMode);
-        return layout;
-    };
-
+    // Each PDF page matches the source image pixel-for-pixel at layoutDpi.
     QPdfWriter writer(outputPath);
     writer.setTitle(QStringLiteral("Mask Studio Export"));
     writer.setResolution(layoutDpi);
-    writer.setPageLayout(layoutForImage(pages.first()));
 
     QPainter painter;
-    if (!painter.begin(&writer))
-        return false;
-    // No smoothing — 1:1 pixel copy preserves source sharpness.
-    painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+    bool pageOpen = false;
 
     for (int i = 0; i < pages.size(); ++i) {
         const QImage &img = pages.at(i);
-        if (i > 0) {
-            writer.setPageLayout(layoutForImage(img));
+        if (img.isNull() || img.width() <= 0 || img.height() <= 0)
+            continue;
+
+        const qreal wPt = img.width() * 72.0 / layoutDpi;
+        const qreal hPt = img.height() * 72.0 / layoutDpi;
+        const QPageSize pageSize(QSizeF(wPt, hPt), QPageSize::Point);
+        QPageLayout layout(pageSize, QPageLayout::Portrait, QMarginsF(0, 0, 0, 0));
+        layout.setMode(QPageLayout::FullPageMode);
+        writer.setPageLayout(layout);
+
+        if (!pageOpen) {
+            if (!painter.begin(&writer))
+                return false;
+            pageOpen = true;
+            painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        } else {
             writer.newPage();
         }
-        const QRect dest(0, 0, writer.width(), writer.height());
-        const QRect src(0, 0, img.width(), img.height());
-        painter.drawImage(dest, img, src);
+
+        painter.fillRect(QRect(0, 0, writer.width(), writer.height()), Qt::white);
+        painter.drawImage(0, 0, img);
     }
+
+    if (!pageOpen)
+        return false;
+
     painter.end();
     return true;
 }

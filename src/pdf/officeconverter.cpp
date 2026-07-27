@@ -27,9 +27,13 @@ const char kWordToPdfScript[] =
     "  $word.Visible=$false; $word.DisplayAlerts=0;"
     "  $doc=$word.Documents.Open($in,$false,$true);"
     "  $doc.ExportAsFixedFormat($out,17);"
+    "} catch {"
+    "  Write-Error $_.Exception.Message;"
+    "  exit 1;"
     "} finally {"
-    "  if($doc){$doc.Close(0)};"
-    "  if($word){$word.Quit()};"
+    "  $ErrorActionPreference='SilentlyContinue';"
+    "  try { if($doc){$doc.Close(0)} } catch {};"
+    "  try { if($word){$word.Quit()} } catch {};"
     "}";
 
 // Word COM: open the PDF (Word converts it) and save as docx (16 = wdFormatDocumentDefault).
@@ -42,9 +46,13 @@ const char kPdfToWordScript[] =
     "  $word.Visible=$false; $word.DisplayAlerts=0;"
     "  $doc=$word.Documents.Open($in,$false,$true);"
     "  $doc.SaveAs2($out,16);"
+    "} catch {"
+    "  Write-Error $_.Exception.Message;"
+    "  exit 1;"
     "} finally {"
-    "  if($doc){$doc.Close(0)};"
-    "  if($word){$word.Quit()};"
+    "  $ErrorActionPreference='SilentlyContinue';"
+    "  try { if($doc){$doc.Close(0)} } catch {};"
+    "  try { if($word){$word.Quit()} } catch {};"
     "}";
 
 bool comUnavailable(const QString &stderrText)
@@ -53,6 +61,24 @@ bool comUnavailable(const QString &stderrText)
     return stderrText.contains(QStringLiteral("80040154"))
         || (stderrText.contains(QStringLiteral("New-Object"), Qt::CaseInsensitive)
             && stderrText.contains(QStringLiteral("ComObject"), Qt::CaseInsensitive));
+}
+
+bool comRpcFailure(const QString &stderrText)
+{
+    // 0x800706BA: RPC server unavailable (Word hung/crashed during COM cleanup).
+    return stderrText.contains(QStringLiteral("800706BA"))
+        || stderrText.contains(QStringLiteral("RPC 服务器不可用"))
+        || stderrText.contains(QStringLiteral("RPC server is unavailable"), Qt::CaseInsensitive);
+}
+
+QString friendlyWordError(const QString &raw)
+{
+    if (comUnavailable(raw))
+        return QString::fromUtf8(kUnavailableError);
+    if (comRpcFailure(raw))
+        return QStringLiteral("Word 无响应，请关闭残留的 Word 进程后重试 / Word is not responding; close any Word processes and retry");
+    return raw.isEmpty() ? QStringLiteral("Word conversion failed")
+                         : raw.left(300);
 }
 
 } // namespace
@@ -101,10 +127,12 @@ QString OfficeConverter::runWordCom(const QString &script, const QString &input,
     if (proc.exitCode() == 0 && QFile::exists(output))
         return {};
 
+    // Conversion may succeed even if Word cleanup fails (RPC 0x800706BA).
+    if (QFile::exists(output))
+        return {};
+
     const QString err = QString::fromLocal8Bit(proc.readAllStandardError()).trimmed();
-    if (comUnavailable(err))
-        return QString::fromUtf8(kUnavailableError);
-    return err.isEmpty() ? QStringLiteral("Word conversion failed") : err.left(300);
+    return friendlyWordError(err);
 }
 
 QString OfficeConverter::findLibreOffice()
@@ -131,12 +159,12 @@ QString OfficeConverter::wordToPdf(const QString &input, const QString &outputPd
     const QString comError = runWordCom(QString::fromUtf8(kWordToPdfScript), input, outputPdf);
     if (comError.isEmpty())
         return {};
-    if (comError != QString::fromUtf8(kUnavailableError))
+    if (!comUnavailable(comError) && !comRpcFailure(comError))
         return comError;
 
     const QString soffice = findLibreOffice();
     if (soffice.isEmpty())
-        return QString::fromUtf8(kUnavailableError);
+        return comError;
 
     const QString outDir = QFileInfo(outputPdf).absolutePath();
     QDir().mkpath(outDir);

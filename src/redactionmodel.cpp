@@ -47,6 +47,16 @@ int RedactionModel::indexOfId(int id) const
     return -1;
 }
 
+int RedactionModel::autoCount() const
+{
+    int n = 0;
+    for (int i : visibleIndices()) {
+        if (m_regions.at(i).source == QLatin1String("auto"))
+            ++n;
+    }
+    return n;
+}
+
 int RedactionModel::rowCount(const QModelIndex &parent) const
 {
     if (parent.isValid())
@@ -70,6 +80,7 @@ QVariant RedactionModel::data(const QModelIndex &index, int role) const
     case KindRole: return r.kind;
     case SourceRole: return r.source;
     case LabelRole: return r.label;
+    case ContentRole: return r.content;
     case SelectedRole: return r.id == m_selectedId;
     default: return {};
     }
@@ -87,6 +98,7 @@ QHash<int, QByteArray> RedactionModel::roleNames() const
         {KindRole, "kind"},
         {SourceRole, "source"},
         {LabelRole, "label"},
+        {ContentRole, "content"},
         {SelectedRole, "isSelected"},
     };
 }

@@ -28,10 +28,9 @@ public:
     static constexpr int kInitialPages = 2;
     static constexpr int kLazyBatchSize = 4;
 
-    // Preview uses lower DPI for speed; export keeps full resolution.
-    static constexpr int kPreviewDpi = 150;
+    static constexpr int kPreviewDpi = 120;
     static constexpr int kExportDpi = 300;
-    static constexpr int kRenderDpi = kExportDpi;
+    static constexpr int kRenderDpi = kPreviewDpi;
 
     static QVector<PageSlot> buildManifest(const QStringList &paths,
                                            QHash<QString, DocxFileCache> *docxCacheOut = nullptr);
@@ -43,6 +42,12 @@ public:
 
     PageContent loadSlot(const PageSlot &slot, QHash<QString, DocxFileCache> *docxCache = nullptr,
                          int dpi = kPreviewDpi);
+
+    // OCR fallback — call from AI analysis only, not during preview load.
+    static void enrichPageWithOcr(PageContent &page);
+
+    // Single-page PDF text via pdftotext (used by AI analysis).
+    static QString pdfTextPage(const QString &pdfPath, int pageIndex0Based);
 
     // enableOcr: off by default for fast preview; diag / future auto-mode can turn on.
     QVector<PageContent> loadFiles(const QStringList &paths,

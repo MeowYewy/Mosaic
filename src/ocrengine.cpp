@@ -67,6 +67,18 @@ QString findTessdataDir(const QString &tesseractExe)
     return {};
 }
 
+void scaleWordsBack(QVector<OcrWord> &words, qreal invScale)
+{
+    if (invScale <= 1.0)
+        return;
+    for (OcrWord &w : words) {
+        w.bbox = QRect(qRound(w.bbox.x() * invScale),
+                       qRound(w.bbox.y() * invScale),
+                       qMax(1, qRound(w.bbox.width() * invScale)),
+                       qMax(1, qRound(w.bbox.height() * invScale)));
+    }
+}
+
 } // namespace
 
 bool OcrEngine::isAvailable()
@@ -128,17 +140,9 @@ QVector<OcrWord> OcrEngine::parseTsv(const QString &tsv, int imgW, int imgH)
     return words;
 }
 
-QVector<OcrWord> OcrEngine::recognize(const QImage &image, QString *errorOut)
+QVector<OcrWord> OcrEngine::recognizeScaled(const QImage &work, qreal scaleBack,
+                                            QString *errorOut, const OcrRecognizeOptions &options)
 {
-    if (errorOut)
-        errorOut->clear();
-
-    if (image.isNull()) {
-        if (errorOut)
-            *errorOut = QStringLiteral("Empty image");
-        return {};
-    }
-
     const QString tesseract = executablePath();
     const QString tessdata = tessdataPath();
     if (tesseract.isEmpty() || tessdata.isEmpty()) {
@@ -156,21 +160,10 @@ QVector<OcrWord> OcrEngine::recognize(const QImage &image, QString *errorOut)
         return {};
     }
 
-    // Downscale only very large phone-camera photos; keep medical scans sharp.
-    constexpr int kMaxDim = 4000;
-    QImage work = image;
-    qreal scale = 1.0;
-    if (work.width() > kMaxDim || work.height() > kMaxDim) {
-        scale = qreal(kMaxDim) / qMax(work.width(), work.height());
-        work = image.scaled(qRound(image.width() * scale),
-                            qRound(image.height() * scale),
-                            Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    }
-
-    // Keep RGB for colour fallback; derive grayscale for first pass.
-    if (work.format() != QImage::Format_RGB32)
-        work = work.convertToFormat(QImage::Format_RGB32);
-    const QImage grayWork = stretchContrast(work.convertToFormat(QImage::Format_Grayscale8));
+    QImage rgbWork = work.format() == QImage::Format_RGB32
+                         ? work
+                         : work.convertToFormat(QImage::Format_RGB32);
+    const QImage grayWork = stretchContrast(rgbWork.convertToFormat(QImage::Format_Grayscale8));
 
     auto runOcr = [&](const QImage &input, const char *psm) -> QVector<OcrWord> {
         const QString imgPath = dir.path() + QStringLiteral("/page.png");
@@ -221,25 +214,103 @@ QVector<OcrWord> OcrEngine::recognize(const QImage &image, QString *errorOut)
         return parseTsv(QString::fromUtf8(tsvFile.readAll()), input.width(), input.height());
     };
 
+    const int fastExit = qMax(4, options.minWordsForFastExit);
+
     QVector<OcrWord> words = runOcr(grayWork, "3");
-    if (words.isEmpty())
-        words = runOcr(work, "3"); // fallback: colour input for tinted scans
-    if (words.isEmpty())
-        words = runOcr(grayWork, "6"); // single uniform text block (photos/screenshots)
-    if (words.isEmpty())
-        words = runOcr(grayWork, "4"); // variable-size text lines
-    if (words.isEmpty())
-        words = runOcr(grayWork, "11"); // sparse text (screenshots)
-    if (scale < 1.0) {
-        const qreal inv = 1.0 / scale;
-        for (OcrWord &w : words) {
-            w.bbox = QRect(qRound(w.bbox.x() * inv),
-                           qRound(w.bbox.y() * inv),
-                           qMax(1, qRound(w.bbox.width() * inv)),
-                           qMax(1, qRound(w.bbox.height() * inv)));
-        }
+    if (options.fastMode && words.size() >= fastExit) {
+        scaleWordsBack(words, scaleBack);
+        return words;
     }
+    if (words.isEmpty())
+        words = runOcr(rgbWork, "3");
+    if (options.fastMode && words.size() >= fastExit) {
+        scaleWordsBack(words, scaleBack);
+        return words;
+    }
+    if (words.isEmpty() && !options.fastMode)
+        words = runOcr(grayWork, "6");
+    if (words.isEmpty())
+        words = runOcr(grayWork, "4");
+    if (words.isEmpty() && !options.fastMode)
+        words = runOcr(grayWork, "11");
+
+    scaleWordsBack(words, scaleBack);
     if (words.isEmpty() && errorOut)
         *errorOut = QStringLiteral("OCR returned no words");
     return words;
+}
+
+QVector<OcrWord> OcrEngine::recognize(const QImage &image, QString *errorOut,
+                                      const OcrRecognizeOptions &options)
+{
+    if (errorOut)
+        errorOut->clear();
+
+    if (image.isNull()) {
+        if (errorOut)
+            *errorOut = QStringLiteral("Empty image");
+        return {};
+    }
+
+    const int maxDim = qMax(1200, options.maxDimension);
+    QImage work = image;
+    qreal scaleBack = 1.0;
+    if (work.width() > maxDim || work.height() > maxDim) {
+        const qreal scale = qreal(maxDim) / qMax(work.width(), work.height());
+        work = image.scaled(qRound(image.width() * scale),
+                            qRound(image.height() * scale),
+                            Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        scaleBack = 1.0 / scale;
+    }
+
+    if (options.headerFooterBands || options.topFormBand || options.footerBand) {
+        const int w = work.width();
+        const int h = work.height();
+
+        OcrRecognizeOptions bandOpts = options;
+        bandOpts.headerFooterBands = false;
+        bandOpts.topFormBand = false;
+        bandOpts.footerBand = false;
+
+        QVector<OcrWord> merged;
+
+        if (options.headerFooterBands) {
+            const int topH = qMax(1, qRound(h * 0.38));
+            const int bottomH = qMax(1, qRound(h * 0.18));
+            const int bottomY = qMax(0, h - bottomH);
+
+            merged += recognizeScaled(work.copy(0, 0, w, topH), scaleBack, nullptr, bandOpts);
+            const QVector<OcrWord> bottomWords =
+                recognizeScaled(work.copy(0, bottomY, w, bottomH), scaleBack, nullptr, bandOpts);
+            for (const OcrWord &bw : bottomWords) {
+                OcrWord shifted = bw;
+                shifted.bbox.translate(0, qRound(bottomY * scaleBack));
+                merged.push_back(shifted);
+            }
+        } else {
+            if (options.topFormBand) {
+                const int topH =
+                    qMax(1, qRound(h * qBound(0.35, options.topFormBandRatio, 0.85)));
+                merged += recognizeScaled(work.copy(0, 0, w, topH), scaleBack, nullptr, bandOpts);
+            }
+            if (options.footerBand) {
+                const int bottomH =
+                    qMax(1, qRound(h * qBound(0.08, options.footerBandRatio, 0.35)));
+                const int bottomY = qMax(0, h - bottomH);
+                const QVector<OcrWord> bottomWords =
+                    recognizeScaled(work.copy(0, bottomY, w, bottomH), scaleBack, nullptr, bandOpts);
+                for (const OcrWord &bw : bottomWords) {
+                    OcrWord shifted = bw;
+                    shifted.bbox.translate(0, qRound(bottomY * scaleBack));
+                    merged.push_back(shifted);
+                }
+            }
+        }
+
+        if (merged.isEmpty() && errorOut)
+            *errorOut = QStringLiteral("OCR returned no words");
+        return merged;
+    }
+
+    return recognizeScaled(work, scaleBack, errorOut, options);
 }

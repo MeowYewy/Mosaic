@@ -1,24 +1,33 @@
 #include "appcontroller.h"
 
+#include "aimarkengine.h"
 #include "appsettings.h"
 #include "documentloader.h"
 #include "filepicker.h"
 #include "mosaicengine.h"
+#include "ocrengine.h"
 #include "previewimageprovider.h"
 #include "pdfpagerenderer.h"
+#include "privacyformmapper.h"
+#include "qwenocrengine.h"
+#include "textregionmapper.h"
 
 #include <QDir>
 #include <QEventLoop>
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QMetaType>
+#include <QMutex>
 #include <QPointer>
+#include <QRegularExpression>
 #include <QSet>
+#include <QThreadPool>
 #include <QUrl>
 #include <QtConcurrent>
 #include <QStandardPaths>
 #include <QTimer>
 #include <algorithm>
+#include <atomic>
 #include <functional>
 
 struct MaskedPdfBuildInput {
@@ -35,7 +44,22 @@ struct MaskedPdfBuildResult {
     bool readOnlyPreview = false;
 };
 
+struct AiMarkJobInput {
+    AiMarkConfig config;
+    QVector<QImage> rawPages;
+    QVector<QString> pageTexts;
+    QVector<PageSlot> pageSlots;
+    int pageCount = 0;
+};
+
+struct AiMarkJobResult {
+    bool ok = false;
+    QString error;
+    QVector<RedactionRegion> regions;
+};
+
 Q_DECLARE_METATYPE(MaskedPdfBuildResult)
+Q_DECLARE_METATYPE(AiMarkJobResult)
 
 using TaskProgressFn = std::function<void(int done, int total)>;
 
@@ -91,6 +115,20 @@ struct ContentIndexResult {
 QString slotKey(const PageSlot &slot)
 {
     return slot.path + QLatin1Char('\0') + QString::number(slot.indexInFile);
+}
+
+QStringList fileOrderFromSlots(const QVector<PageSlot> &pageSlots)
+{
+    QStringList order;
+    order.reserve(pageSlots.size());
+    for (const PageSlot &slot : pageSlots) {
+        const QString path = normalizedFilePath(slot.path);
+        if (path.isEmpty())
+            continue;
+        if (order.isEmpty() || normalizedFilePath(order.last()) != path)
+            order.append(slot.path);
+    }
+    return order;
 }
 
 LoadedPageBatch toLoadedBatch(const PageBatchInput &input,
@@ -459,6 +497,326 @@ QVector<QPair<int, PageContent>> loadPageBatch(const PageBatchInput &input)
     return loaded;
 }
 
+QString plainTextFromOcrWords(const QVector<OcrWord> &words)
+{
+    if (words.isEmpty())
+        return {};
+    QStringList parts;
+    parts.reserve(words.size());
+    for (const OcrWord &word : words)
+        parts << word.text;
+    return parts.join(QLatin1Char(' '));
+}
+
+QSet<QString> collectNameTokens(const QVector<AiMarkHit> &hits)
+{
+    QSet<QString> names;
+    for (const AiMarkHit &hit : hits) {
+        if (hit.kind == QLatin1String("name") && hit.text.size() >= 2)
+            names.insert(hit.text.trimmed());
+    }
+    return names;
+}
+
+bool hasRichPdfTextLayer(const QString &text)
+{
+    const QString trimmed = text.trimmed();
+    return trimmed.size() >= 250 && trimmed.count(QChar(0x4e00)) >= 20;
+}
+
+int countTokenInText(const QString &text, const QString &token)
+{
+    if (text.isEmpty() || token.size() < 2)
+        return 0;
+    int count = 0;
+    int idx = 0;
+    while ((idx = text.indexOf(token, idx, Qt::CaseInsensitive)) >= 0) {
+        ++count;
+        idx += qMax(1, token.size());
+    }
+    return count;
+}
+
+bool shouldOcrFooterBand(const QString &pageText)
+{
+    static const QRegularExpression nameRe(
+        QStringLiteral(R"((?:姓\s*名)[：:\s]*([\x{4e00}-\x{9fff}·]{2,8}))"),
+        QRegularExpression::UseUnicodePropertiesOption);
+
+    for (auto it = nameRe.globalMatch(pageText); it.hasNext();) {
+        if (countTokenInText(pageText, it.next().captured(1)) >= 2)
+            return true;
+    }
+
+    static const QRegularExpression tokenRes[] = {
+        QRegularExpression(QStringLiteral(R"((?:住院号)[：:\s]*([A-Za-z0-9\-]{4,24}))")),
+        QRegularExpression(QStringLiteral(R"((?:条码号)[：:\s]*([A-Za-z0-9\-]{4,24}))")),
+        QRegularExpression(QStringLiteral(R"((?:标本号)[：:\s]*([A-Za-z0-9\-]{3,24}))")),
+    };
+    for (const QRegularExpression &re : tokenRes) {
+        for (auto it = re.globalMatch(pageText); it.hasNext();) {
+            if (countTokenInText(pageText, it.next().captured(1)) >= 2)
+                return true;
+        }
+    }
+    return false;
+}
+
+QVector<OcrWord> ocrWordsForAiMarking(const QImage &image, const QString &pageText)
+{
+    Q_UNUSED(pageText);
+    if (image.isNull() || !OcrEngine::isAvailable())
+        return {};
+
+    OcrRecognizeOptions opts;
+    opts.fastMode = false;
+    opts.maxDimension = 4000;
+    return OcrEngine::recognize(image, nullptr, opts);
+}
+
+struct AiMarkPageResult {
+    QVector<RedactionRegion> regions;
+    QSet<QString> patientNames;
+    QVector<OcrWord> ocrWords;
+    int imgW = 0;
+    int imgH = 0;
+    QString error;
+    bool hadApiCall = false;
+    bool skipped = false;
+};
+
+bool shouldMergeAutoRects(const RedactionRegion &a, const RedactionRegion &b)
+{
+    if (a.kind != b.kind)
+        return false;
+    if (a.label != b.label)
+        return false;
+    const QRectF &ra = a.rect;
+    const QRectF &rb = b.rect;
+    if (!ra.intersects(rb))
+        return false;
+    const QRectF united = ra.united(rb);
+    if (united.width() > 0.22)
+        return false;
+    const QRectF inter = ra.intersected(rb);
+    const qreal interArea = inter.width() * inter.height();
+    const qreal minArea = qMin(ra.width() * ra.height(), rb.width() * rb.height());
+    return minArea > 0.0 && interArea / minArea > 0.55;
+}
+
+QVector<RedactionRegion> mergeOverlappingAutoRegions(QVector<RedactionRegion> regions)
+{
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (int i = 0; i < regions.size(); ++i) {
+            for (int j = i + 1; j < regions.size(); ++j) {
+                if (regions.at(i).pageIndex != regions.at(j).pageIndex)
+                    continue;
+                if (regions.at(i).source != QLatin1String("auto")
+                    || regions.at(j).source != QLatin1String("auto")) {
+                    continue;
+                }
+                if (!shouldMergeAutoRects(regions.at(i), regions.at(j)))
+                    continue;
+                regions[i].rect = regions.at(i).rect.united(regions.at(j).rect);
+                const QString otherContent = regions.at(j).content.trimmed();
+                if (!otherContent.isEmpty()) {
+                    if (regions[i].content.trimmed().isEmpty()) {
+                        regions[i].content = otherContent;
+                    } else if (!regions[i].content.contains(otherContent)) {
+                        regions[i].content += QStringLiteral("\u3001") + otherContent;
+                    }
+                }
+                regions.removeAt(j);
+                changed = true;
+                break;
+            }
+            if (changed)
+                break;
+        }
+    }
+    return regions;
+}
+
+AiMarkPageResult processAiMarkPage(const AiMarkJobInput &input, int pageIndex)
+{
+    AiMarkPageResult pageResult;
+    const QImage image =
+        pageIndex < input.rawPages.size() ? input.rawPages.at(pageIndex) : QImage();
+    QString pageText =
+        pageIndex < input.pageTexts.size() ? input.pageTexts.at(pageIndex) : QString();
+    const bool qwenOcrMode = input.config.mode == QLatin1String("qwen_ocr");
+
+    if (pageIndex < input.pageSlots.size()) {
+        const PageSlot &slot = input.pageSlots.at(pageIndex);
+        if (slot.kind == PageSlot::Pdf && pageText.trimmed().isEmpty())
+            pageText = DocumentLoader::pdfTextPage(slot.path, slot.indexInFile);
+    }
+
+    QVector<OcrWord> ocrWords;
+    QVector<AiMarkHit> hits;
+    QString error;
+
+    if (qwenOcrMode) {
+        if (image.isNull()) {
+            pageResult.skipped = true;
+            return pageResult;
+        }
+        ocrWords = QwenOcrEngine::recognizePage(input.config, image, &hits, &error);
+        pageResult.hadApiCall = true;
+        if (!error.isEmpty() && ocrWords.isEmpty()) {
+            pageResult.error = error;
+            return pageResult;
+        }
+        pageText = plainTextFromOcrWords(ocrWords);
+    } else {
+        if (!image.isNull())
+            ocrWords = ocrWordsForAiMarking(image, pageText);
+
+        if (pageText.trimmed().isEmpty() && !ocrWords.isEmpty())
+            pageText = plainTextFromOcrWords(ocrWords);
+
+        if (pageText.trimmed().isEmpty()) {
+            pageResult.skipped = true;
+            return pageResult;
+        }
+
+        AiMarkPageInput pageInput;
+        pageInput.pageIndex = pageIndex;
+        pageInput.pageText = pageText;
+        pageInput.imgW = image.width() > 0 ? image.width() : 900;
+        pageInput.imgH = image.height() > 0 ? image.height() : 1200;
+        pageInput.ocrWords = ocrWords;
+        pageInput.privacyPolicy = input.config.privacy;
+
+        hits = AiMarkEngine::analyzePage(input.config, pageInput, &error);
+        pageResult.hadApiCall = true;
+        if (!error.isEmpty() && hits.isEmpty()) {
+            pageResult.error = error;
+            return pageResult;
+        }
+    }
+
+    if (pageText.trimmed().isEmpty()) {
+        pageResult.skipped = true;
+        return pageResult;
+    }
+
+    AiMarkPageInput pageInput;
+    pageInput.pageIndex = pageIndex;
+    pageInput.pageText = pageText;
+    pageInput.imgW = image.width() > 0 ? image.width() : 900;
+    pageInput.imgH = image.height() > 0 ? image.height() : 1200;
+    pageInput.ocrWords = ocrWords;
+    pageInput.privacyPolicy = input.config.privacy;
+
+    AiMarkEngine::supplementPrivacyHits(hits, pageInput);
+
+    QSet<QString> patientNames;
+    if (input.config.privacy.maskName) {
+        patientNames = collectNameTokens(hits);
+        patientNames.unite(PrivacyFormMapper::extractPatientNamesFromText(pageText));
+    }
+
+    QVector<RedactionRegion> regions = AiMarkEngine::hitsToRegions(pageInput, hits);
+    if (!ocrWords.isEmpty()) {
+        const QVector<RedactionRegion> formRegions = PrivacyFormMapper::detectRegions(
+            pageIndex, ocrWords, pageInput.imgW, pageInput.imgH, input.config.privacy);
+        regions += formRegions;
+        if (!patientNames.isEmpty()) {
+            regions += PrivacyFormMapper::maskRepeatedNames(pageIndex, ocrWords, patientNames,
+                                                              pageInput.imgW, pageInput.imgH,
+                                                              input.config.privacy);
+        }
+    }
+
+    pageResult.regions = mergeOverlappingAutoRegions(regions);
+    pageResult.patientNames = patientNames;
+    pageResult.ocrWords = ocrWords;
+    pageResult.imgW = pageInput.imgW;
+    pageResult.imgH = pageInput.imgH;
+    return pageResult;
+}
+
+AiMarkJobResult runAiMarkJob(const AiMarkJobInput &input, const TaskProgressFn &progress)
+{
+    AiMarkJobResult result;
+    if (input.pageCount <= 0 || !AiMarkEngine::isConfigured(input.config)) {
+        result.error = QStringLiteral("AI API is not configured");
+        return result;
+    }
+
+    const int total = input.pageCount;
+    QVector<int> pageIndices;
+    pageIndices.reserve(total);
+    for (int i = 0; i < total; ++i)
+        pageIndices.append(i);
+
+    QVector<AiMarkPageResult> pageResults(total);
+    std::atomic<int> done{0};
+    std::atomic<bool> failed{false};
+    QMutex errorMutex;
+    QString firstError;
+
+    QThreadPool pool;
+    pool.setMaxThreadCount(qMin(2, qMax(1, QThread::idealThreadCount())));
+
+    QtConcurrent::blockingMap(&pool, pageIndices, [&](int pageIndex) {
+        if (failed.load())
+            return;
+
+        pageResults[pageIndex] = processAiMarkPage(input, pageIndex);
+
+        if (!pageResults[pageIndex].error.isEmpty()) {
+            QMutexLocker lock(&errorMutex);
+            if (!failed.exchange(true))
+                firstError = pageResults[pageIndex].error;
+        }
+
+        const int n = ++done;
+        if (progress)
+            progress(n, total);
+    });
+
+    if (failed.load()) {
+        result.error = firstError;
+        return result;
+    }
+
+    QVector<RedactionRegion> allRegions;
+    QSet<QString> allPatientNames;
+    int apiCalls = 0;
+    for (const AiMarkPageResult &pageResult : pageResults) {
+        if (pageResult.hadApiCall)
+            ++apiCalls;
+        allPatientNames.unite(pageResult.patientNames);
+        allRegions += pageResult.regions;
+    }
+
+    if (input.config.privacy.maskName && !allPatientNames.isEmpty()) {
+        for (int pageIndex = 0; pageIndex < pageResults.size(); ++pageIndex) {
+            const AiMarkPageResult &page = pageResults.at(pageIndex);
+            if (page.ocrWords.isEmpty() || page.imgW <= 0 || page.imgH <= 0)
+                continue;
+            const QVector<RedactionRegion> repeatRegions =
+                PrivacyFormMapper::maskRepeatedNames(pageIndex, page.ocrWords, allPatientNames,
+                                                     page.imgW, page.imgH, input.config.privacy);
+            allRegions += repeatRegions;
+        }
+        allRegions = mergeOverlappingAutoRegions(allRegions);
+    }
+
+    if (apiCalls == 0) {
+        result.error = QStringLiteral("No extractable text on any page");
+        return result;
+    }
+
+    result.ok = true;
+    result.regions = allRegions;
+    return result;
+}
+
 } // namespace
 
 AppController::AppController(PreviewImageProvider *provider,
@@ -486,6 +844,15 @@ AppController::AppController(PreviewImageProvider *provider,
     connect(m_files, &FileListModel::countChanged, this, &AppController::fileCountChanged);
     connect(m_files, &FileListModel::pathsChanged, this, &AppController::onFilePathsChanged);
     connect(m_redactions, &RedactionModel::regionsChanged, this, [this]() {
+        int autoTotal = 0;
+        for (const RedactionRegion &r : m_redactions->allRegions()) {
+            if (r.source == QLatin1String("auto"))
+                ++autoTotal;
+        }
+        if (m_autoMarkCount != autoTotal) {
+            m_autoMarkCount = autoTotal;
+            emit autoMarkCountChanged();
+        }
         if (m_showMaskedPreview)
             rebuildMaskedPreview(false);
     });
@@ -614,6 +981,15 @@ int AppController::currentPageHeight() const
     return m_rawPages.at(m_currentPage).height();
 }
 
+qreal AppController::currentPageAspect() const
+{
+    const int w = currentPageWidth();
+    const int h = currentPageHeight();
+    if (w > 0 && h > 0)
+        return qreal(w) / h;
+    return 0.707;
+}
+
 void AppController::setProcessing(bool on)
 {
     if (m_processing == on)
@@ -661,6 +1037,8 @@ QString AppController::taskLabel() const
         return m_settings->trKey(QStringLiteral("exporting"));
     if (m_activeTask == QLatin1String("prepareMasked"))
         return m_settings->trKey(QStringLiteral("preparingMaskedPreview"));
+    if (m_activeTask == QLatin1String("aiMark"))
+        return m_settings->trKey(QStringLiteral("aiMarkAnalyzing"));
     return m_settings->trKey(QStringLiteral("loadingPreview"));
 }
 
@@ -759,6 +1137,76 @@ void AppController::sortFilesByContent()
     if (!m_contentSortReady || m_contentSortRunning || fileCount() <= 1)
         return;
     m_files->sortByContentKeys(m_contentSortKeys);
+}
+
+void AppController::runAiMarking()
+{
+    if (m_pageCount <= 0 || !m_activeTask.isEmpty())
+        return;
+    if (!m_settings || !m_settings->aiConfigured()) {
+        emit actionFinished(false, m_settings ? m_settings->trKey(QStringLiteral("aiNotConfigured"))
+                                              : QStringLiteral("AI not configured"));
+        return;
+    }
+
+    waitForAllPagesLoaded();
+
+    AiMarkJobInput job;
+    job.config.apiBaseUrl = m_settings->aiApiBase();
+    job.config.apiKey = m_settings->aiApiKey();
+    job.config.model = m_settings->aiModel();
+    job.config.mode = m_settings->aiMarkMode();
+    job.config.ocrCloudMode = m_settings->aiOcrCloudMode();
+    job.config.privacy = m_settings->privacyPolicy();
+    job.rawPages = m_rawPages;
+    job.pageTexts = m_pageTexts;
+    job.pageSlots = m_pageSlots;
+    job.pageCount = m_pageCount;
+
+    beginTask(QStringLiteral("aiMark"), true);
+    QPointer<AppController> self(this);
+    auto *watcher = new QFutureWatcher<AiMarkJobResult>(this);
+    connect(watcher, &QFutureWatcher<AiMarkJobResult>::finished, this, [this, watcher]() {
+        const AiMarkJobResult result = watcher->result();
+        watcher->deleteLater();
+        endTask();
+
+        if (!result.ok) {
+            QString msg;
+            if (result.error == QStringLiteral("No extractable text on any page"))
+                msg = m_settings->trKey(QStringLiteral("aiMarkNoText"));
+            else if (result.error.contains(QStringLiteral("Authentication"), Qt::CaseInsensitive)
+                     || result.error.contains(QStringLiteral("Unauthorized"), Qt::CaseInsensitive))
+                msg = m_settings->trKey(QStringLiteral("aiAuthFailed"));
+            else if (result.error.isEmpty())
+                msg = m_settings->trKey(QStringLiteral("aiMarkFailed")).arg(QStringLiteral("unknown"));
+            else
+                msg = m_settings->trKey(QStringLiteral("aiMarkFailed")).arg(result.error);
+            emit actionFinished(false, msg);
+            return;
+        }
+
+        m_redactions->replaceAutoRegions(result.regions);
+        m_autoMarkCount = result.regions.size();
+        emit autoMarkCountChanged();
+        rebuildMaskedPreview(true);
+        bumpPreviewToken();
+
+        const QString msg = result.regions.isEmpty()
+                                ? m_settings->trKey(QStringLiteral("aiMarkNone"))
+                                : m_settings->trKey(QStringLiteral("aiMarkDone"))
+                                      .arg(result.regions.size());
+        emit actionFinished(true, msg);
+    });
+    watcher->setFuture(QtConcurrent::run([job, self]() {
+        return runAiMarkJob(job, [self](int done, int total) {
+            if (!self)
+                return;
+            const qreal progress = qreal(done) / qMax(1, total);
+            QMetaObject::invokeMethod(self.data(), "setTaskProgress", Qt::QueuedConnection,
+                                      Q_ARG(qreal, progress));
+        });
+    }));
 }
 
 bool AppController::isSamePathSet(const QStringList &a, const QStringList &b)
@@ -996,8 +1444,15 @@ void AppController::scheduleContentIndex()
     }));
 }
 
-void AppController::cancelBackgroundLoad()
+void AppController::cancelPendingPreviewLoads()
 {
+    if (m_manifestWatcher) {
+        auto *watcher = static_cast<QFutureWatcher<ManifestResult> *>(m_manifestWatcher);
+        watcher->disconnect(this);
+        watcher->cancel();
+        watcher->deleteLater();
+        m_manifestWatcher = nullptr;
+    }
     if (m_lazyWatcher) {
         auto *watcher = static_cast<QFutureWatcher<LoadedPageBatch> *>(m_lazyWatcher);
         watcher->cancel();
@@ -1007,6 +1462,192 @@ void AppController::cancelBackgroundLoad()
     m_loadingPages.clear();
     m_queuedPageLoads.clear();
     setBackgroundLoading(false);
+}
+
+void AppController::cancelBackgroundLoad()
+{
+    cancelPendingPreviewLoads();
+}
+
+bool AppController::canAppendToPreview(const QStringList &paths) const
+{
+    if (m_pageSlots.isEmpty() || m_pageCount <= 0 || paths.isEmpty())
+        return false;
+
+    const QStringList loadedOrder = fileOrderFromSlots(m_pageSlots);
+    if (paths.size() <= loadedOrder.size())
+        return false;
+
+    for (int i = 0; i < loadedOrder.size(); ++i) {
+        if (!sameFilePath(paths.at(i), loadedOrder.at(i)))
+            return false;
+    }
+
+    return isPageLoaded(0)
+           || (m_currentPage >= 0 && m_currentPage < m_pageCount
+               && isPageLoaded(m_currentPage));
+}
+
+void AppController::appendPreviewLoad(const QStringList &paths)
+{
+    cancelPendingPreviewLoads();
+    ++m_loadGeneration;
+
+    const int generation = m_loadGeneration;
+    const QVector<PageSlot> oldSlots = m_pageSlots;
+    const QVector<QImage> oldRaw = m_rawPages;
+    const QVector<QString> oldTexts = m_pageTexts;
+    const int oldCurrentPage = m_currentPage;
+
+    setBackgroundLoading(true);
+
+    QHash<QString, DocxFileCache> primedDocxCache = m_docxCache;
+    DocumentLoader::primeDocxCaches(paths, &primedDocxCache);
+
+    auto *manifestWatcher = new QFutureWatcher<ManifestResult>(this);
+    m_manifestWatcher = manifestWatcher;
+    connect(manifestWatcher, &QFutureWatcher<ManifestResult>::finished, this,
+            [this, manifestWatcher, generation, oldSlots, oldRaw, oldTexts, oldCurrentPage]() {
+                if (m_manifestWatcher == manifestWatcher)
+                    m_manifestWatcher = nullptr;
+                manifestWatcher->deleteLater();
+                if (generation != m_loadGeneration)
+                    return;
+
+                const ManifestResult manifest = manifestWatcher->result();
+
+                QHash<QString, int> oldKeyToIndex;
+                oldKeyToIndex.reserve(oldSlots.size());
+                for (int i = 0; i < oldSlots.size(); ++i)
+                    oldKeyToIndex.insert(slotKey(oldSlots.at(i)), i);
+
+                m_pageSlots = manifest.pageSlots;
+                m_docxCache = manifest.docxCache;
+                const int newCount = m_pageSlots.size();
+                m_rawPages = QVector<QImage>(newCount);
+                m_pageTexts = QVector<QString>(newCount);
+
+                QList<int> toLoad;
+                toLoad.reserve(newCount);
+                for (int i = 0; i < newCount; ++i) {
+                    const int oldIdx = oldKeyToIndex.value(slotKey(m_pageSlots.at(i)), -1);
+                    if (oldIdx >= 0 && oldIdx < oldRaw.size() && !oldRaw.at(oldIdx).isNull()) {
+                        m_rawPages[i] = oldRaw.at(oldIdx);
+                        if (oldIdx < oldTexts.size())
+                            m_pageTexts[i] = oldTexts.at(oldIdx);
+                    } else {
+                        toLoad.append(i);
+                    }
+                }
+
+                m_pageCount = newCount;
+                if (oldCurrentPage >= 0 && oldCurrentPage < m_pageCount)
+                    m_currentPage = oldCurrentPage;
+                else if (m_pageCount > 0)
+                    m_currentPage = qBound(0, m_currentPage, m_pageCount - 1);
+
+                m_redactions->setPageFilter(m_currentPage, pageFilePath(m_currentPage));
+
+                if (m_provider) {
+                    m_provider->setPageCount(m_pageCount);
+                    m_provider->setRawPages(m_rawPages);
+                    if (m_showMaskedPreview)
+                        rebuildMaskedPreview(true);
+                }
+
+                emit pageCountChanged();
+                emit currentPageChanged();
+                bumpPreviewToken();
+                updateLoadProgress();
+
+                if (toLoad.isEmpty()) {
+                    setBackgroundLoading(false);
+                    if (allPagesLoaded()) {
+                        m_progress = 0;
+                        emit progressChanged();
+                    }
+                    tryScheduleContentIndex();
+                    return;
+                }
+
+                const int batchSize = qMin(toLoad.size(), DocumentLoader::kLazyBatchSize);
+                schedulePageLoad(toLoad.mid(0, batchSize), false);
+                if (toLoad.size() > batchSize)
+                    m_queuedPageLoads = toLoad.mid(batchSize);
+
+                tryScheduleContentIndex();
+            });
+
+    manifestWatcher->setFuture(QtConcurrent::run([paths, primedDocxCache]() {
+        ManifestResult result;
+        result.docxCache = primedDocxCache;
+        result.pageSlots = DocumentLoader::buildManifest(paths, &result.docxCache);
+        return result;
+    }));
+}
+
+void AppController::startManifestLoad(const QStringList &paths, bool /*appendMode*/)
+{
+    const int generation = m_loadGeneration;
+
+    QHash<QString, DocxFileCache> primedDocxCache;
+    DocumentLoader::primeDocxCaches(paths, &primedDocxCache);
+
+    auto *manifestWatcher = new QFutureWatcher<ManifestResult>(this);
+    m_manifestWatcher = manifestWatcher;
+    connect(manifestWatcher, &QFutureWatcher<ManifestResult>::finished, this,
+            [this, manifestWatcher, generation]() {
+                if (m_manifestWatcher == manifestWatcher)
+                    m_manifestWatcher = nullptr;
+                manifestWatcher->deleteLater();
+                if (generation != m_loadGeneration)
+                    return;
+
+                const ManifestResult manifest = manifestWatcher->result();
+
+                m_pageSlots = manifest.pageSlots;
+                m_docxCache = manifest.docxCache;
+                m_rawPages = QVector<QImage>(m_pageSlots.size());
+                m_pageTexts = QVector<QString>(m_pageSlots.size());
+                m_pageCount = m_pageSlots.size();
+                m_currentPage = 0;
+                m_redactions->setPageFilter(0, pageFilePath(0));
+                m_redactions->replaceAutoRegions({});
+                m_autoMarkCount = 0;
+                emit autoMarkCountChanged();
+
+                if (m_provider) {
+                    m_provider->setPageCount(m_pageCount);
+                    m_provider->setMaskedPages({});
+                }
+
+                emit pageCountChanged();
+                emit currentPageChanged();
+                resetPreviewView();
+                bumpPreviewToken();
+
+                if (m_pageCount <= 0) {
+                    setProcessing(false);
+                    emit actionFinished(false, QStringLiteral("加载失败：请确认文件格式与路径"));
+                    return;
+                }
+
+                m_progress = 0.08;
+                emit progressChanged();
+
+                QList<int> initial;
+                const int initialCount = qMin(m_pageCount, DocumentLoader::kInitialPages);
+                for (int i = 0; i < initialCount; ++i)
+                    initial.append(i);
+                schedulePageLoad(initial, true);
+            });
+
+    manifestWatcher->setFuture(QtConcurrent::run([paths, primedDocxCache]() {
+        ManifestResult result;
+        result.docxCache = primedDocxCache;
+        result.pageSlots = DocumentLoader::buildManifest(paths, &result.docxCache);
+        return result;
+    }));
 }
 
 void AppController::schedulePreviewReload()
@@ -1135,7 +1776,13 @@ void AppController::applyLoadedBatch(const LoadedPageBatch &batch)
     for (const auto &entry : batch.pages) {
         const int idx = entry.first;
         const PageContent &pc = entry.second;
-        if (idx < 0 || idx >= m_pageCount || pc.image.isNull())
+        if (idx < 0 || idx >= m_pageCount)
+            continue;
+
+        // Always clear the in-flight flag so failed renders can be retried.
+        m_loadingPages.remove(idx);
+
+        if (pc.image.isNull())
             continue;
 
         if (idx >= m_rawPages.size())
@@ -1144,7 +1791,6 @@ void AppController::applyLoadedBatch(const LoadedPageBatch &batch)
         if (idx >= m_pageTexts.size())
             m_pageTexts.resize(m_pageCount);
         m_pageTexts[idx] = pc.text;
-        m_loadingPages.remove(idx);
         if (m_provider)
             m_provider->setRawPageAt(idx, pc.image);
     }
@@ -1181,6 +1827,9 @@ void AppController::applyLoadedBatch(const LoadedPageBatch &batch)
 
     if (batch.unblockUi) {
         setProcessing(false);
+
+        if (!isPageLoaded(0) && m_pageCount > 0)
+            scheduleRemainingPages();
 
         const QString msg = m_pageCount <= 0
                                 ? QStringLiteral("加载失败：请确认文件格式与路径")
@@ -1233,14 +1882,24 @@ void AppController::schedulePageLoad(const QList<int> &indices, bool unblockUi)
 
     auto *watcher = new QFutureWatcher<LoadedPageBatch>(this);
     m_lazyWatcher = watcher;
-    connect(watcher, &QFutureWatcher<LoadedPageBatch>::finished, this, [this, watcher]() {
-        if (m_lazyWatcher == watcher)
-            m_lazyWatcher = nullptr;
-        watcher->deleteLater();
-        if (watcher->isCanceled())
-            return;
-        applyLoadedBatch(watcher->result());
-    });
+    connect(watcher, &QFutureWatcher<LoadedPageBatch>::finished, this,
+            [this, watcher, indices, unblockUi, generation = m_loadGeneration]() {
+                if (m_lazyWatcher == watcher)
+                    m_lazyWatcher = nullptr;
+                watcher->deleteLater();
+                if (watcher->isCanceled()) {
+                    if (generation == m_loadGeneration) {
+                        for (int idx : indices)
+                            m_loadingPages.remove(idx);
+                        if (unblockUi && m_processing && m_activeTask.isEmpty() && !m_lazyWatcher
+                            && m_queuedPageLoads.isEmpty()) {
+                            setProcessing(false);
+                        }
+                    }
+                    return;
+                }
+                applyLoadedBatch(watcher->result());
+            });
 
     watcher->setFuture(QtConcurrent::run([input]() {
         return toLoadedBatch(input, loadPageBatch(input));
@@ -1327,6 +1986,16 @@ void AppController::waitForAllPagesLoaded()
         }));
         loop.exec();
         applyLoadedBatch(watcher.result());
+
+        int loadedInBatch = 0;
+        for (int idx : batch) {
+            if (isPageLoaded(idx))
+                ++loadedInBatch;
+            else
+                pending.append(idx);
+        }
+        if (loadedInBatch == 0)
+            break;
     }
     setBackgroundLoading(false);
 }
@@ -1362,7 +2031,13 @@ void AppController::loadPreview()
         return;
     }
 
-    cancelBackgroundLoad();
+    const QStringList paths = m_files->paths();
+    if (canAppendToPreview(paths)) {
+        appendPreviewLoad(paths);
+        return;
+    }
+
+    cancelPendingPreviewLoads();
     ++m_loadGeneration;
 
     if (m_showMaskedPreview) {
@@ -1370,67 +2045,12 @@ void AppController::loadPreview()
         emit showMaskedPreviewChanged();
     }
 
-    const int generation = m_loadGeneration;
-    const QStringList paths = m_files->paths();
-
     setProcessing(true);
     setBackgroundLoading(false);
     m_progress = 0.02;
     emit progressChanged();
 
-    QHash<QString, DocxFileCache> primedDocxCache;
-    DocumentLoader::primeDocxCaches(paths, &primedDocxCache);
-
-    auto *manifestWatcher = new QFutureWatcher<ManifestResult>(this);
-    connect(manifestWatcher, &QFutureWatcher<ManifestResult>::finished, this,
-            [this, manifestWatcher, generation]() {
-                const ManifestResult manifest = manifestWatcher->result();
-                manifestWatcher->deleteLater();
-                if (generation != m_loadGeneration)
-                    return;
-
-                m_pageSlots = manifest.pageSlots;
-                m_docxCache = manifest.docxCache;
-                m_rawPages = QVector<QImage>(m_pageSlots.size());
-                m_pageTexts = QVector<QString>(m_pageSlots.size());
-                m_pageCount = m_pageSlots.size();
-                m_currentPage = 0;
-                m_redactions->setPageFilter(0, pageFilePath(0));
-                m_redactions->replaceAutoRegions({});
-                m_autoMarkCount = 0;
-                emit autoMarkCountChanged();
-
-                if (m_provider) {
-                    m_provider->setPageCount(m_pageCount);
-                    m_provider->setMaskedPages({});
-                }
-
-                emit pageCountChanged();
-                emit currentPageChanged();
-                bumpPreviewToken();
-
-                if (m_pageCount <= 0) {
-                    setProcessing(false);
-                    emit actionFinished(false, QStringLiteral("加载失败：请确认文件格式与路径"));
-                    return;
-                }
-
-                m_progress = 0.08;
-                emit progressChanged();
-
-                QList<int> initial;
-                const int initialCount = qMin(m_pageCount, DocumentLoader::kInitialPages);
-                for (int i = 0; i < initialCount; ++i)
-                    initial.append(i);
-                schedulePageLoad(initial, true);
-            });
-
-    manifestWatcher->setFuture(QtConcurrent::run([paths, primedDocxCache]() {
-        ManifestResult result;
-        result.docxCache = primedDocxCache;
-        result.pageSlots = DocumentLoader::buildManifest(paths, &result.docxCache);
-        return result;
-    }));
+    startManifestLoad(paths, false);
 }
 
 void AppController::exportRedacted()
@@ -1440,6 +2060,14 @@ void AppController::exportRedacted()
         return;
     }
     if (!m_activeTask.isEmpty())
+        return;
+
+    // Recover from a stuck preview loader so export is not blocked forever.
+    if (m_processing
+        && (isPageLoaded(m_currentPage) || isPageLoaded(0))) {
+        setProcessing(false);
+    }
+    if (m_processing)
         return;
 
     const QString filter = QStringLiteral("%1 (*.pdf);;%2 (*.png)")

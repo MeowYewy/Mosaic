@@ -7,6 +7,7 @@ PreviewImageProvider::PreviewImageProvider()
 
 QImage PreviewImageProvider::requestImage(const QString &id, QSize *size, const QSize &requestedSize)
 {
+    Q_UNUSED(requestedSize)
     // id format: "<pageIndex>/raw/<token>" or "<pageIndex>/mask/<token>"
     const QStringList parts = id.split(QLatin1Char('/'), Qt::SkipEmptyParts);
     const int index = parts.value(0).toInt();
@@ -17,11 +18,8 @@ QImage PreviewImageProvider::requestImage(const QString &id, QSize *size, const 
         return {};
     if (size)
         *size = img.size();
-    if (requestedSize.isValid() && requestedSize.width() > 0 && requestedSize.height() > 0) {
-        // Only downscale for thumbnail requests; never upscale (causes blur).
-        if (requestedSize.width() < img.width() || requestedSize.height() < img.height())
-            return img.scaled(requestedSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    }
+    // Always return the full cached page. QML Image + PreserveAspectFit handles display
+    // scaling; scaling here to requestedSize caused aspect/layout mismatches (JPG stretch).
     return img;
 }
 

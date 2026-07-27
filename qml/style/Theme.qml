@@ -49,6 +49,7 @@ QtObject {
     readonly property color success: dark ? "#3ECF9A" : "#34C759"
     readonly property color danger: "#FF3B30"
     readonly property color maskAuto: "#F59E0B"
+    readonly property color maskAutoFill: dark ? "#F59E0B28" : "#F59E0B30"
     readonly property color maskManual: dark ? "#14B8A6" : "#0F766E"
     readonly property color maskManualFill: dark ? "#0F766E44" : "#0F766E44"
     readonly property color maskManualDraft: dark ? "#0F766E33" : "#0F766E33"
@@ -66,7 +67,7 @@ QtObject {
     readonly property int radiusSm: 8
     readonly property int radiusMd: 12
     readonly property int radiusLg: 16
-    readonly property int headerHeight: 56
+    readonly property int headerHeight: 64
 
     readonly property string uiFontFamily: "Microsoft YaHei"
     readonly property font mainFont: Qt.font({ family: uiFontFamily, pixelSize: 15 })

@@ -72,6 +72,8 @@ class AppController : public QObject
 
     Q_PROPERTY(int currentPageHeight READ currentPageHeight NOTIFY previewLayoutChanged)
 
+    Q_PROPERTY(qreal currentPageAspect READ currentPageAspect NOTIFY previewLayoutChanged)
+
     Q_PROPERTY(QString toolMode READ toolMode WRITE setToolMode NOTIFY toolModeChanged)
 
     Q_PROPERTY(int mosaicStyle READ mosaicStyle WRITE setMosaicStyle NOTIFY mosaicStyleChanged)
@@ -133,6 +135,8 @@ public:
 
     int currentPageHeight() const;
 
+    qreal currentPageAspect() const;
+
     bool hasPreview() const { return m_pageCount > 0; }
 
     QString toolMode() const { return m_toolMode; }
@@ -186,6 +190,8 @@ public:
     Q_INVOKABLE void sortFilesByType();
 
     Q_INVOKABLE void sortFilesByContent();
+
+    Q_INVOKABLE void runAiMarking();
 
     Q_INVOKABLE void removeFileAt(int index);
 
@@ -277,6 +283,14 @@ private:
     void setFileDialogOpen(bool on);
 
     void cancelBackgroundLoad();
+
+    void cancelPendingPreviewLoads();
+
+    bool canAppendToPreview(const QStringList &paths) const;
+
+    void appendPreviewLoad(const QStringList &paths);
+
+    void startManifestLoad(const QStringList &paths, bool appendMode);
 
     void applyLoadedBatch(const LoadedPageBatch &batch);
 
@@ -398,5 +412,7 @@ private:
     QStringList m_trackedFilePaths;
 
     QObject *m_contentIndexWatcher = nullptr;
+
+    QObject *m_manifestWatcher = nullptr;
 };
 

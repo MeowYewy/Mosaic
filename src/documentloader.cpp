@@ -23,24 +23,59 @@ DocumentLoader::DocumentLoader(QObject *parent)
 {
 }
 
-namespace {
-
-void enrichWithOcr(PageContent &page)
+void DocumentLoader::enrichPageWithOcr(PageContent &page)
 {
     if (page.image.isNull())
         return;
-    QString err;
-    page.ocrWords = OcrEngine::recognize(page.image, &err);
-    if (!page.ocrWords.isEmpty()) {
-        QStringList parts;
-        parts.reserve(page.ocrWords.size());
-        for (const OcrWord &w : page.ocrWords)
-            parts << w.text;
-        const QString ocrPlain = parts.join(QLatin1Char(' '));
-        if (page.text.trimmed().isEmpty())
-            page.text = ocrPlain;
-    }
+
+    page.ocrWords = OcrEngine::recognize(page.image, nullptr);
+    if (page.ocrWords.isEmpty())
+        return;
+
+    QStringList parts;
+    parts.reserve(page.ocrWords.size());
+    for (const OcrWord &w : page.ocrWords)
+        parts << w.text;
+    const QString ocrPlain = parts.join(QLatin1Char(' '));
+    if (page.text.trimmed().isEmpty())
+        page.text = ocrPlain;
 }
+
+QString DocumentLoader::pdfTextPage(const QString &pdfPath, int pageIndex0Based)
+{
+    if (pdfPath.isEmpty() || pageIndex0Based < 0)
+        return {};
+
+    DocumentLoader loader;
+    const QString pdftoppm = loader.findPdftoppm();
+    if (pdftoppm.isEmpty())
+        return {};
+
+    const QString pdftotext =
+        QFileInfo(pdftoppm).absolutePath() + QStringLiteral("/pdftotext.exe");
+    if (!QFileInfo::exists(pdftotext))
+        return {};
+
+    QTemporaryDir dir;
+    if (!dir.isValid())
+        return {};
+    const QString out = dir.path() + QStringLiteral("/out.txt");
+    const QString page1 = QString::number(pageIndex0Based + 1);
+    const QStringList args = {QStringLiteral("-layout"), QStringLiteral("-enc"),
+                              QStringLiteral("UTF-8"), QStringLiteral("-f"), page1,
+                              QStringLiteral("-l"), page1, pdfPath, out};
+
+    QProcess p;
+    p.start(pdftotext, args);
+    if (!p.waitForFinished(30000) || p.exitCode() != 0)
+        return {};
+    QFile f(out);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        return {};
+    return QString::fromUtf8(f.readAll()).trimmed();
+}
+
+namespace {
 
 PageSlot::Kind kindForExt(const QString &ext)
 {
@@ -171,8 +206,16 @@ PageContent DocumentLoader::loadSlot(const PageSlot &slot,
         QImageReader reader(slot.path);
         reader.setAutoTransform(true);
         QImage img = reader.read();
-        if (!img.isNull())
+        if (!img.isNull()) {
             pc.image = img.convertToFormat(QImage::Format_RGB32);
+            if (dpi <= kPreviewDpi) {
+                constexpr int kMaxPreviewEdge = 2400;
+                if (pc.image.width() > kMaxPreviewEdge || pc.image.height() > kMaxPreviewEdge) {
+                    pc.image = pc.image.scaled(kMaxPreviewEdge, kMaxPreviewEdge,
+                                               Qt::KeepAspectRatio, Qt::SmoothTransformation);
+                }
+            }
+        }
         break;
     }
     case PageSlot::Pdf: {
@@ -203,9 +246,9 @@ QString DocumentLoader::findPdftoppm() const
 {
     const QString appDir = QCoreApplication::applicationDirPath();
     const QStringList candidates = {
-        appDir + QStringLiteral("/tools/poppler/pdftoppm.exe"),
-        QDir(appDir).filePath(QStringLiteral("../../../ProjectP/desktop-qt/tools/poppler/pdftoppm.exe")),
-        QStringLiteral("D:/TechG/ProjectP/desktop-qt/tools/poppler/pdftoppm.exe"),
+        QDir(appDir).filePath(QStringLiteral("tools/poppler/pdftoppm.exe")),
+        QDir(appDir).filePath(QStringLiteral("../tools/poppler/pdftoppm.exe")),
+        QStringLiteral("pdftoppm"),
     };
     for (const QString &c : candidates) {
         if (QFileInfo::exists(c))
@@ -359,7 +402,7 @@ QVector<PageContent> DocumentLoader::loadFiles(const QStringList &paths,
         QThreadPool pool;
         pool.setMaxThreadCount(qBound(1, QThread::idealThreadCount() - 1, 8));
         QtConcurrent::blockingMap(&pool, all, [&](PageContent &pc) {
-            enrichWithOcr(pc);
+            DocumentLoader::enrichPageWithOcr(pc);
             const int n = ++done;
             if (progress)
                 progress(0.35 + 0.65 * n / total);

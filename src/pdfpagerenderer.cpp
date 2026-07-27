@@ -12,6 +12,7 @@
 
 #ifdef HAS_QT_PDF
 #include <QPdfDocument>
+#include <QPdfPageModel>
 #endif
 
 namespace {
@@ -31,12 +32,10 @@ int pageNumberFromPath(const QString &path)
 
 QString findPdftoppm()
 {
+    const QString appDir = QCoreApplication::applicationDirPath();
     const QStringList candidates = {
-        QDir(QCoreApplication::applicationDirPath())
-            .filePath(QStringLiteral("tools/poppler/pdftoppm.exe")),
-        QDir(QCoreApplication::applicationDirPath())
-            .filePath(QStringLiteral("../../../ProjectP/desktop-qt/tools/poppler/pdftoppm.exe")),
-        QStringLiteral("D:/TechG/ProjectP/desktop-qt/tools/poppler/pdftoppm.exe"),
+        QDir(appDir).filePath(QStringLiteral("tools/poppler/pdftoppm.exe")),
+        QDir(appDir).filePath(QStringLiteral("../tools/poppler/pdftoppm.exe")),
         QStringLiteral("pdftoppm"),
     };
     for (const QString &path : candidates) {
@@ -134,6 +133,58 @@ bool runPopplerRange(const QString &pdftoppm, const QString &pdfPath,
     return !found.isEmpty();
 }
 
+#ifdef HAS_QT_PDF
+int qtPageRotationDegrees(const QPdfDocument &doc, int pageIndex)
+{
+    const QAbstractItemModel *model = doc.pageModel();
+    if (!model)
+        return 0;
+    const QModelIndex idx = model->index(pageIndex, 0);
+    if (!idx.isValid())
+        return 0;
+    const QVariant value = model->data(idx, QPdfPageModel::RotationRole);
+    if (!value.isValid())
+        return 0;
+    switch (value.value<QPdfPageModel::Rotation>()) {
+    case QPdfPageModel::Rotation::Clockwise90:
+        return 90;
+    case QPdfPageModel::Rotation::Clockwise180:
+        return 180;
+    case QPdfPageModel::Rotation::Clockwise270:
+        return 270;
+    default:
+        return 0;
+    }
+}
+
+QSize qtRenderPixelSize(const QPdfDocument &doc, int pageIndex, int dpi)
+{
+    const QSizeF pageSize = doc.pagePointSize(pageIndex);
+    if (pageSize.isEmpty())
+        return {};
+
+    qreal ptW = pageSize.width();
+    qreal ptH = pageSize.height();
+    const int rotation = qtPageRotationDegrees(doc, pageIndex);
+    if (rotation == 90 || rotation == 270)
+        std::swap(ptW, ptH);
+
+    const qreal scale = dpi / 72.0;
+    return {qMax(1, qRound(ptW * scale)), qMax(1, qRound(ptH * scale))};
+}
+
+QImage qtRenderPage(QPdfDocument &doc, int pageIndex, int dpi)
+{
+    const QSize imageSize = qtRenderPixelSize(doc, pageIndex, dpi);
+    if (!imageSize.isValid())
+        return {};
+    const QImage image = doc.render(pageIndex, imageSize);
+    if (image.isNull())
+        return {};
+    return image.convertToFormat(QImage::Format_RGB32);
+}
+#endif
+
 } // namespace
 
 int PdfPageRenderer::pageCount(const QString &pdfPath)
@@ -181,6 +232,39 @@ QVector<QImage> PdfPageRenderer::renderPages(const QString &pdfPath, int firstPa
     const int startIndex = qMax(1, firstPage1);
     const int endIndex = qMax(startIndex, lastPage1);
 
+    const QString pdftoppm = findPdftoppm();
+    if (!pdftoppm.isEmpty()) {
+        QTemporaryDir dir;
+        if (dir.isValid()) {
+            QMap<int, QString> outputs;
+            int page = startIndex;
+            while (page <= endIndex) {
+                int runEnd = page;
+                while (runEnd + 1 <= endIndex)
+                    ++runEnd;
+                if (!runPopplerRange(pdftoppm, pdfPath, dir.path(), QStringLiteral("page"),
+                                     dpi, page, runEnd, &outputs))
+                    break;
+                page = runEnd + 1;
+            }
+
+            for (int p = startIndex; p <= endIndex; ++p) {
+                if (!outputs.contains(p)) {
+                    images.push_back(QImage());
+                    continue;
+                }
+                QImage img;
+                if (img.load(outputs.value(p)))
+                    images.push_back(img.convertToFormat(QImage::Format_RGB32));
+                else
+                    images.push_back(QImage());
+            }
+            if (!images.isEmpty())
+                return images;
+        }
+        images.clear();
+    }
+
 #ifdef HAS_QT_PDF
     QPdfDocument doc;
     if (doc.load(pdfPath) == QPdfDocument::Error::None) {
@@ -189,58 +273,14 @@ QVector<QImage> PdfPageRenderer::renderPages(const QString &pdfPath, int firstPa
         images.reserve(last - startIndex + 1);
 
         for (int page = startIndex; page <= last; ++page) {
-            const int i = page - 1;
-            const QSizeF pageSize = doc.pagePointSize(i);
-            if (pageSize.isEmpty()) {
-                images.push_back(QImage());
-                continue;
-            }
-
-            const qreal scale = dpi / 72.0;
-            const QSize imageSize(qMax(1, int(pageSize.width() * scale)),
-                                  qMax(1, int(pageSize.height() * scale)));
-            const QImage image = doc.render(i, imageSize);
-            if (image.isNull())
-                images.push_back(QImage());
-            else
-                images.push_back(image.convertToFormat(QImage::Format_RGB32));
+            const QImage image = qtRenderPage(doc, page - 1, dpi);
+            images.push_back(image);
         }
         if (!images.isEmpty())
             return images;
     }
 #endif
 
-    const QString pdftoppm = findPdftoppm();
-    if (pdftoppm.isEmpty())
-        return images;
-
-    QTemporaryDir dir;
-    if (!dir.isValid())
-        return images;
-
-    QMap<int, QString> outputs;
-    int page = startIndex;
-    while (page <= endIndex) {
-        int runEnd = page;
-        while (runEnd + 1 <= endIndex)
-            ++runEnd;
-        if (!runPopplerRange(pdftoppm, pdfPath, dir.path(), QStringLiteral("page"),
-                             dpi, page, runEnd, &outputs))
-            break;
-        page = runEnd + 1;
-    }
-
-    for (int p = startIndex; p <= endIndex; ++p) {
-        if (!outputs.contains(p)) {
-            images.push_back(QImage());
-            continue;
-        }
-        QImage img;
-        if (img.load(outputs.value(p)))
-            images.push_back(img.convertToFormat(QImage::Format_RGB32));
-        else
-            images.push_back(QImage());
-    }
     return images;
 }
 
@@ -270,15 +310,7 @@ QImage PdfPageRenderer::renderPageWithQt(const QString &pdfPath, int pageIndex, 
     QPdfDocument doc;
     if (doc.load(pdfPath) != QPdfDocument::Error::None)
         return {};
-
-    const QSizeF pageSize = doc.pagePointSize(pageIndex);
-    if (pageSize.isEmpty())
-        return {};
-
-    const qreal scale = dpi / 72.0;
-    const QSize imageSize(qMax(1, int(pageSize.width() * scale)),
-                          qMax(1, int(pageSize.height() * scale)));
-    return doc.render(pageIndex, imageSize);
+    return qtRenderPage(doc, pageIndex, dpi);
 #else
     Q_UNUSED(pdfPath)
     Q_UNUSED(pageIndex)
@@ -304,15 +336,7 @@ QStringList PdfPageRenderer::renderPdfPages(const QString &pdfPath, const QStrin
         const int last = qMin(endIndex, count);
 
         for (int page = startIndex; page <= last; ++page) {
-            const int i = page - 1;
-            const QSizeF pageSize = doc.pagePointSize(i);
-            if (pageSize.isEmpty())
-                continue;
-
-            const qreal scale = dpi / 72.0;
-            const QSize imageSize(qMax(1, int(pageSize.width() * scale)),
-                                  qMax(1, int(pageSize.height() * scale)));
-            const QImage image = doc.render(i, imageSize);
+            const QImage image = qtRenderPage(doc, page - 1, dpi);
             if (image.isNull())
                 continue;
 
