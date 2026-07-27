@@ -30,7 +30,7 @@ constexpr auto kManifestMirror =
     "https://gitee.com/MeowYewy/mosaic/raw/main/resources/update.json";
 
 constexpr auto kDefaultSilentInstallArgs =
-    "/SILENT /SUPPRESSMSGBOXES /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS";
+    "/SILENT /SUPPRESSMSGBOXES /NORESTARTAPPLICATIONS";
 
 constexpr qint64 kMinInstallerBytes = 512 * 1024;
 // Small parallel probe only — first source to deliver this many bytes wins the full download.
@@ -58,14 +58,6 @@ void configureUpdateRequest(QNetworkRequest &request)
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::NoLessSafeRedirectPolicy);
     request.setTransferTimeout(60'000);
-}
-
-QString normalizeVersionTag(const QString &version)
-{
-    QString v = version.trimmed();
-    if (v.startsWith(QLatin1Char('v'), Qt::CaseInsensitive))
-        v = v.mid(1);
-    return v;
 }
 
 QString mosaicInstalledExe()
@@ -96,6 +88,42 @@ QString mosaicInstalledExe()
             return QDir::toNativeSeparators(exe);
     }
     return {};
+}
+
+QString normalizeVersionTag(const QString &version)
+{
+    QString v = version.trimmed();
+    if (v.startsWith(QLatin1Char('v'), Qt::CaseInsensitive))
+        v = v.mid(1);
+    return v;
+}
+
+QString localUpdateCacheDir()
+{
+    QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (dir.isEmpty())
+        dir = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation);
+    if (dir.isEmpty())
+        dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    dir = QDir(dir).filePath(QStringLiteral("updates"));
+    QDir().mkpath(dir);
+    return dir;
+}
+
+QString normalizeSilentInstallArgs(QString args)
+{
+    args.replace(QStringLiteral("/VERYSILENT"), QStringLiteral("/SILENT"), Qt::CaseInsensitive);
+    args.remove(QRegularExpression(QStringLiteral(R"(/\*?\s*RESTARTAPPLICATIONS\b)"),
+                                   QRegularExpression::CaseInsensitiveOption));
+    args.remove(QRegularExpression(QStringLiteral(R"(/\*?\s*CLOSEAPPLICATIONS\b)"),
+                                   QRegularExpression::CaseInsensitiveOption));
+    if (!args.contains(QStringLiteral("/NORESTARTAPPLICATIONS"), Qt::CaseInsensitive))
+        args += QStringLiteral(" /NORESTARTAPPLICATIONS");
+    if (!args.contains(QStringLiteral("/SUPPRESSMSGBOXES"), Qt::CaseInsensitive))
+        args += QStringLiteral(" /SUPPRESSMSGBOXES");
+    if (!args.contains(QStringLiteral("/SILENT"), Qt::CaseInsensitive))
+        args += QStringLiteral(" /SILENT");
+    return args.trimmed();
 }
 
 } // namespace
@@ -401,11 +429,10 @@ bool UpdateChecker::tryApplyManifest(const QByteArray &data)
     m_latestVersion = remoteVersion;
     m_downloadUrls = validUrls;
     m_downloadUrl = validUrls.constFirst();
-    m_silentInstallArgs = root.value(QStringLiteral("silentInstallArgs")).toString();
-    if (m_silentInstallArgs.trimmed().isEmpty())
+    m_silentInstallArgs = normalizeSilentInstallArgs(
+        root.value(QStringLiteral("silentInstallArgs")).toString());
+    if (m_silentInstallArgs.isEmpty())
         m_silentInstallArgs = QString::fromUtf8(kDefaultSilentInstallArgs);
-    m_silentInstallArgs.replace(QStringLiteral("/VERYSILENT"), QStringLiteral("/SILENT"),
-                                Qt::CaseInsensitive);
     emit latestVersionChanged();
     emit downloadUrlChanged();
 
@@ -650,8 +677,7 @@ void UpdateChecker::finishInstallerSave(const QByteArray &payload, const QString
     if (fileName.isEmpty() || !fileName.endsWith(QLatin1String(".exe"), Qt::CaseInsensitive))
         fileName = QStringLiteral("Mosaic_%1_update.exe").arg(m_latestVersion);
 
-    const QString destPath = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
-                                 .filePath(fileName);
+    const QString destPath = QDir(localUpdateCacheDir()).filePath(fileName);
 
     if (QFile::exists(destPath))
         QFile::remove(destPath);
@@ -706,40 +732,45 @@ void UpdateChecker::installUpdate()
         return;
     }
 
-    QString argsLine = m_silentInstallArgs.trimmed().isEmpty()
-                           ? QString::fromUtf8(kDefaultSilentInstallArgs)
-                           : m_silentInstallArgs;
-    if (!argsLine.contains(QStringLiteral("/CLOSEAPPLICATIONS"), Qt::CaseInsensitive))
-        argsLine += QStringLiteral(" /CLOSEAPPLICATIONS");
-    if (!argsLine.contains(QStringLiteral("/NORESTARTAPPLICATIONS"), Qt::CaseInsensitive))
-        argsLine += QStringLiteral(" /NORESTARTAPPLICATIONS");
-
+    const QString argsLine = normalizeSilentInstallArgs(
+        m_silentInstallArgs.trimmed().isEmpty() ? QString::fromUtf8(kDefaultSilentInstallArgs)
+                                                : m_silentInstallArgs);
     const QString nativeInstaller = QDir::toNativeSeparators(m_installerPath);
-    QString batch =
-        QStringLiteral("start \"\" /wait \"%1\" %2").arg(nativeInstaller, argsLine.trimmed());
+    const QString restartExe = mosaicInstalledExe();
 
-    const QString exePath = mosaicInstalledExe();
-    if (!exePath.isEmpty())
-        batch += QStringLiteral(" && start \"\" \"%1\"").arg(exePath);
+    const QString helperDir = localUpdateCacheDir();
+    const QString helperPath = QDir(helperDir).filePath(QStringLiteral("run_install.bat"));
+
+    QString batch = QStringLiteral("@echo off\r\n");
+    batch += QStringLiteral("timeout /t 2 /nobreak >nul\r\n");
+    batch += QStringLiteral("start \"\" /wait \"%1\" %2\r\n").arg(nativeInstaller, argsLine);
+    if (!restartExe.isEmpty()) {
+        batch += QStringLiteral("if not errorlevel 1 start \"\" \"%1\"\r\n").arg(restartExe);
+    }
+    batch += QStringLiteral("del \"%~f0\"\r\n");
+
+    QFile helper(helperPath);
+    if (!helper.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        setStatus(DownloadFailed);
+        return;
+    }
+    helper.write(batch.toLocal8Bit());
+    helper.close();
+
+    m_installLaunched = true;
+    abortAllNetworkReplies();
 
     qint64 pid = 0;
-    bool started = QProcess::startDetached(QStringLiteral("cmd.exe"),
-                                           {QStringLiteral("/c"), batch},
-                                           QString(),
-                                           &pid);
+    const bool started = QProcess::startDetached(
+        QStringLiteral("cmd.exe"),
+        {QStringLiteral("/c"), QDir::toNativeSeparators(helperPath)},
+        helperDir,
+        &pid);
     if (!started || pid <= 0) {
-        const QStringList args = QProcess::splitCommand(argsLine);
-        started = QProcess::startDetached(m_installerPath, args, QString(), &pid);
-        if (!started || pid <= 0) {
-            started = QProcess::startDetached(m_installerPath, QStringList(), QString(), &pid);
-        }
-    }
-    if (!started || pid <= 0) {
+        m_installLaunched = false;
         setStatus(DownloadFailed);
         return;
     }
 
-    m_installLaunched = true;
-    abortAllNetworkReplies();
-    QTimer::singleShot(500, this, &UpdateChecker::quitForInstaller);
+    quitForInstaller();
 }

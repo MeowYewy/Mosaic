@@ -1,6 +1,6 @@
 {
   "version": "0.2.0",
   "downloadUrl": "https://github.com/MeowYewy/Mosaic/releases/download/v0.2.0/Mosaic_0.2.0_win64_Setup.exe",
-  "silentInstallArgs": "/SILENT /SUPPRESSMSGBOXES /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS",
+  "silentInstallArgs": "/SILENT /SUPPRESSMSGBOXES /NORESTARTAPPLICATIONS",
   "releaseNotes": "新增 AI 脱敏功能。"
 }

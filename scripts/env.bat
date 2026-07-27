@@ -64,19 +64,15 @@ if not exist "%QT_DIR%\bin\windeployqt.exe" (
 
 set "PATH=%QT_DIR%\bin;%MINGW_DIR%\bin;%CMAKE_DIR%;%NINJA_DIR%;%PATH%"
 
-rem Pick newest dev build output (flat build.bat, Qt Creator, or release).
-set "BUILD_DIR=%PROJECT_ROOT%\build"
+rem Prefer Release output for packaging; fall back to flat build, then Qt Creator Debug.
+set "BUILD_DIR=%PROJECT_ROOT%\build\release"
 set "BUILD_EXE=%BUILD_DIR%\Mosaic.exe"
-if exist "%PROJECT_ROOT%\build\release\Mosaic.exe" (
-    set "BUILD_DIR=%PROJECT_ROOT%\build\release"
-    set "BUILD_EXE=%BUILD_DIR%\Mosaic.exe"
-)
-if exist "%PROJECT_ROOT%\build\Desktop_Qt_6_11_1_MinGW_64_bit_Debug\Mosaic.exe" (
-    set "BUILD_DIR=%PROJECT_ROOT%\build\Desktop_Qt_6_11_1_MinGW_64_bit_Debug"
-    set "BUILD_EXE=%BUILD_DIR%\Mosaic.exe"
-)
-if exist "%PROJECT_ROOT%\build\Mosaic.exe" (
+if not exist "%BUILD_EXE%" (
     set "BUILD_DIR=%PROJECT_ROOT%\build"
+    set "BUILD_EXE=%BUILD_DIR%\Mosaic.exe"
+)
+if not exist "%BUILD_EXE%" if exist "%PROJECT_ROOT%\build\Desktop_Qt_6_11_1_MinGW_64_bit_Debug\Mosaic.exe" (
+    set "BUILD_DIR=%PROJECT_ROOT%\build\Desktop_Qt_6_11_1_MinGW_64_bit_Debug"
     set "BUILD_EXE=%BUILD_DIR%\Mosaic.exe"
 )
 if not exist "%BUILD_EXE%" if exist "%BUILD_DIR%\MaskStudio.exe" (

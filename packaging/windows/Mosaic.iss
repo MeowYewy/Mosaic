@@ -28,7 +28,7 @@ DefaultGroupName=Mosaic
 DisableProgramGroupPage=yes
 OutputDir={#OutputDir}
 OutputBaseFilename=Mosaic_{#AppVersion}_win64_Setup
-Compression=lzma2
+Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
@@ -38,7 +38,7 @@ CloseApplications=force
 CloseApplicationsFilter=Mosaic.exe
 AppMutex=MosaicAppMutex
 SetupIconFile={#AppIconFile}
-UninstallDisplayIcon={#AppIconFile}
+UninstallDisplayIcon={app}\Mosaic.exe
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "languages\ChineseSimplified.isl"
