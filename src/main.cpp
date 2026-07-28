@@ -35,7 +35,7 @@ int main(int argc, char *argv[])
     app.setOrganizationName(QStringLiteral("TechG"));
     app.setOrganizationDomain(QStringLiteral("techg.local"));
     app.setApplicationName(QStringLiteral("Mosaic"));
-    app.setApplicationVersion(QStringLiteral("0.2.0"));
+    app.setApplicationVersion(QStringLiteral("0.2.1"));
 
     QIcon appIcon(QStringLiteral(":/qt/qml/ProjectO/resources/app-icon.ico"));
     if (appIcon.isNull())

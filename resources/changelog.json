@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.2.1",
+    "date": "2026-07-28",
+    "notes": {
+      "zh_CN": "修复更新异常的问题。",
+      "en": "Fixed update issues."
+    }
+  },
+  {
     "version": "0.2.0",
     "date": "2026-07-27",
     "notes": {
