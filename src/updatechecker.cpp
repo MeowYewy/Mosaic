@@ -499,9 +499,9 @@ void UpdateChecker::simulateUpdatePreview()
         if (m_installLaunched)
             return;
 
-        m_latestVersion = QStringLiteral("0.2.2");
-        m_downloadUrl = QStringLiteral("https://github.com/MeowYewy/Mosaic/releases/download/v0.2.2/"
-                                       "Mosaic_0.2.2_win64_Setup.exe");
+        m_latestVersion = QStringLiteral("0.2.1");
+        m_downloadUrl = QStringLiteral("https://github.com/MeowYewy/Mosaic/releases/download/v0.2.1/"
+                                       "Mosaic_0.2.1_win64_Setup.exe");
         m_downloadProgress = 100;
         emit latestVersionChanged();
         emit downloadUrlChanged();
