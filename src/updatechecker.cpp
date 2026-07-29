@@ -23,7 +23,6 @@
 
 #ifdef Q_OS_WIN
 #include <windows.h>
-#include <shellapi.h>
 #endif
 
 namespace {
@@ -65,7 +64,12 @@ void configureUpdateRequest(QNetworkRequest &request)
     request.setTransferTimeout(60'000);
 }
 
-QString mosaicInstalledExe()
+QString absoluteNativePath(const QString &path)
+{
+    return QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath());
+}
+
+QString mosaicInstallLocation()
 {
     const QString appId =
         QStringLiteral("{B7E4A2C1-9D3F-4E8A-B6C5-1F0E2D3A4B5C}_is1");
@@ -78,19 +82,9 @@ QString mosaicInstalledExe()
 
     for (const QString &regPath : regPaths) {
         QSettings reg(regPath, QSettings::NativeFormat);
-        const QString loc = reg.value(QStringLiteral("InstallLocation")).toString();
-        if (loc.isEmpty())
-            continue;
-        const QString exe = QDir(loc).filePath(QStringLiteral("Mosaic.exe"));
-        if (QFile::exists(exe))
-            return QDir::toNativeSeparators(exe);
-    }
-
-    const QString pf = qEnvironmentVariable("ProgramFiles");
-    if (!pf.isEmpty()) {
-        const QString exe = QDir(pf).filePath(QStringLiteral("Mosaic/Mosaic.exe"));
-        if (QFile::exists(exe))
-            return QDir::toNativeSeparators(exe);
+        const QString loc = reg.value(QStringLiteral("InstallLocation")).toString().trimmed();
+        if (!loc.isEmpty())
+            return absoluteNativePath(loc);
     }
     return {};
 }
@@ -124,50 +118,22 @@ bool isLocalFilesystemPath(const QString &path)
     return !isUncPath(path);
 }
 
-QString localUpdateCacheDir()
+QString windowsLocalUpdateDir()
 {
-    auto tryDir = [](const QString &base) -> QString {
-        if (base.isEmpty() || !isLocalFilesystemPath(base))
-            return {};
-        const QString dir = QDir(base).filePath(QStringLiteral("updates"));
-        if (QDir().mkpath(dir) && isLocalFilesystemPath(dir))
-            return QDir(dir).absolutePath();
-        return {};
-    };
-
-    if (const QString dir = tryDir(
-            QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation));
-        !dir.isEmpty()) {
-        return dir;
-    }
-    if (const QString dir = tryDir(
-            QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation));
-        !dir.isEmpty()) {
-        return dir;
-    }
-    if (const QString dir = tryDir(QStandardPaths::writableLocation(QStandardPaths::HomeLocation));
-        !dir.isEmpty()) {
-        return dir;
-    }
-
 #ifdef Q_OS_WIN
-    const QString programData =
-        QDir(qEnvironmentVariable("ProgramData")).filePath(QStringLiteral("Mosaic/updates"));
-    if (QDir().mkpath(programData) && isLocalFilesystemPath(programData))
-        return QDir(programData).absolutePath();
+    wchar_t localAppData[MAX_PATH] = {};
+    const DWORD len = GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH);
+    if (len > 0 && len < MAX_PATH) {
+        const QString dir =
+            QDir(QString::fromWCharArray(localAppData)).filePath(QStringLiteral("Mosaic/updates"));
+        if (QDir().mkpath(dir))
+            return absoluteNativePath(dir);
+    }
 #endif
-
-    const QString temp = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
-    if (const QString dir = tryDir(temp); !dir.isEmpty())
-        return dir;
-
-    return QDir(QStandardPaths::writableLocation(QStandardPaths::HomeLocation))
-        .filePath(QStringLiteral("Mosaic/updates"));
-}
-
-QString absoluteNativePath(const QString &path)
-{
-    return QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath());
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    const QString dir = QDir(base).filePath(QStringLiteral("updates"));
+    QDir().mkpath(dir);
+    return absoluteNativePath(dir);
 }
 
 bool looksLikeInstallerFile(const QString &path)
@@ -180,7 +146,7 @@ bool looksLikeInstallerFile(const QString &path)
     return file.read(2) == QByteArrayLiteral("MZ");
 }
 
-QString resolveLocalInstallerPath(const QString &path, QString *errorOut = nullptr)
+QString ensureLocalInstallerPath(const QString &path, QString *errorOut = nullptr)
 {
     if (errorOut)
         errorOut->clear();
@@ -195,13 +161,7 @@ QString resolveLocalInstallerPath(const QString &path, QString *errorOut = nullp
     if (isLocalFilesystemPath(absolute))
         return absolute;
 
-    const QString cacheDir = absoluteNativePath(localUpdateCacheDir());
-    if (cacheDir.size() < 4) {
-        if (errorOut)
-            *errorOut = QStringLiteral("No local update cache directory");
-        return {};
-    }
-
+    const QString cacheDir = windowsLocalUpdateDir();
     const QString dest = QDir(cacheDir).filePath(QFileInfo(absolute).fileName());
     if (QFile::exists(dest))
         QFile::remove(dest);
@@ -213,90 +173,21 @@ QString resolveLocalInstallerPath(const QString &path, QString *errorOut = nullp
     return absoluteNativePath(dest);
 }
 
-QStringList silentInstallArgList(const QString &argsLine)
+QString defaultLocalInstallDir()
 {
-    QStringList args;
-    args.reserve(6);
-    for (const QString &part : argsLine.split(QLatin1Char(' '), Qt::SkipEmptyParts)) {
-        const QString trimmed = part.trimmed();
-        if (!trimmed.isEmpty())
-            args.append(trimmed);
-    }
-    return args;
+    const QString existing = mosaicInstallLocation();
+    if (!existing.isEmpty() && isLocalFilesystemPath(existing))
+        return QDir(existing).absolutePath();
+
+    const QString pf = qEnvironmentVariable("ProgramFiles");
+    if (!pf.isEmpty())
+        return QDir(pf).filePath(QStringLiteral("Mosaic"));
+    return QStringLiteral("C:\\Program Files\\Mosaic");
 }
 
-#ifdef Q_OS_WIN
-bool shellExecuteInstaller(const QString &installerPath, const QString &argsLine)
+QString installDirOverrideArg()
 {
-    const HINSTANCE rc = ShellExecuteW(nullptr,
-                                       L"open",
-                                       reinterpret_cast<LPCWSTR>(installerPath.utf16()),
-                                       argsLine.isEmpty() ? nullptr
-                                                          : reinterpret_cast<LPCWSTR>(argsLine.utf16()),
-                                       nullptr,
-                                       SW_SHOW);
-    return reinterpret_cast<intptr_t>(rc) > 32;
-}
-#endif
-
-bool launchInstallerDetached(const QString &installerPath, const QStringList &args,
-                             QString *errorOut = nullptr)
-{
-    if (errorOut)
-        errorOut->clear();
-
-    QString resolveError;
-    const QString localInstaller = resolveLocalInstallerPath(installerPath, &resolveError);
-    if (localInstaller.isEmpty()) {
-        if (errorOut)
-            *errorOut = resolveError.isEmpty() ? QStringLiteral("Installer missing or invalid")
-                                               : resolveError;
-        return false;
-    }
-
-    const QString argsLine = args.join(QLatin1Char(' '));
-
-#ifdef Q_OS_WIN
-    if (shellExecuteInstaller(localInstaller, argsLine))
-        return true;
-#endif
-
-    qint64 pid = 0;
-    if (QProcess::startDetached(localInstaller, args, QString(), &pid) && pid > 0)
-        return true;
-
-    pid = 0;
-    if (QProcess::startDetached(localInstaller, QStringList(), QString(), &pid) && pid > 0)
-        return true;
-
-    const QString helperPath =
-        QDir(localUpdateCacheDir()).filePath(QStringLiteral("run_install.bat"));
-    QString batch = QStringLiteral("@echo off\r\n");
-    batch += QStringLiteral("ping /t 3 /nobreak >nul\r\n");
-    batch += QStringLiteral("call \"%1\" %2\r\n").arg(localInstaller, argsLine);
-    batch += QStringLiteral("del \"%~f0\"\r\n");
-
-    QFile helper(helperPath);
-    if (!helper.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        if (errorOut)
-            *errorOut = QStringLiteral("Cannot write install helper");
-        return false;
-    }
-    helper.write(batch.toLocal8Bit());
-    helper.close();
-
-    pid = 0;
-    if (QProcess::startDetached(QStringLiteral("cmd.exe"),
-                                {QStringLiteral("/c"), absoluteNativePath(helperPath)},
-                                QString(),
-                                &pid)
-        && pid > 0) {
-        return true;
-    }
-
-    if (errorOut)
-        *errorOut = QStringLiteral("Failed to start installer");
-    return false;
+    return QStringLiteral("/DIR=\"%1\"").arg(absoluteNativePath(defaultLocalInstallDir()));
 }
 
 QString normalizeSilentInstallArgs(QString args)
@@ -312,7 +203,76 @@ QString normalizeSilentInstallArgs(QString args)
         args += QStringLiteral(" /SUPPRESSMSGBOXES");
     if (!args.contains(QStringLiteral("/SILENT"), Qt::CaseInsensitive))
         args += QStringLiteral(" /SILENT");
+    if (!args.contains(QStringLiteral("/DIR="), Qt::CaseInsensitive))
+        args += QStringLiteral(" ") + installDirOverrideArg();
     return args.trimmed();
+}
+
+bool writeUpdateHelperScript(const QString &installerPath, const QString &argsLine,
+                             QString *errorOut = nullptr)
+{
+    if (errorOut)
+        errorOut->clear();
+
+    const QString cacheDir = windowsLocalUpdateDir();
+    const QString helperPath = QDir(cacheDir).filePath(QStringLiteral("mosaic_update.cmd"));
+
+    QString batch = QStringLiteral("@echo off\r\n");
+    batch += QStringLiteral("setlocal EnableDelayedExpansion\r\n");
+    batch += QStringLiteral(":wait_mosaic\r\n");
+    batch += QStringLiteral("tasklist /FI \"IMAGENAME eq Mosaic.exe\" 2>nul | find /I \"Mosaic.exe\" >nul\r\n");
+    batch += QStringLiteral("if not errorlevel 1 (ping /t 1 /nobreak >nul & goto wait_mosaic)\r\n");
+    batch += QStringLiteral("ping /t 1 /nobreak >nul\r\n");
+    batch += QStringLiteral("start \"\" /wait \"");
+    batch += installerPath;
+    batch += QStringLiteral("\" ");
+    batch += argsLine;
+    batch += QStringLiteral("\r\n");
+    batch += QStringLiteral("del \"%~f0\"\r\n");
+
+    if (QFile::exists(helperPath))
+        QFile::remove(helperPath);
+
+    QFile helper(helperPath);
+    if (!helper.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        if (errorOut)
+            *errorOut = QStringLiteral("Cannot write update helper");
+        return false;
+    }
+    helper.write(batch.toLocal8Bit());
+    helper.close();
+    return true;
+}
+
+bool launchUpdateHelper(QString *errorOut = nullptr)
+{
+    if (errorOut)
+        errorOut->clear();
+
+    const QString helperPath =
+        QDir(windowsLocalUpdateDir()).filePath(QStringLiteral("mosaic_update.cmd"));
+    if (!QFile::exists(helperPath)) {
+        if (errorOut)
+            *errorOut = QStringLiteral("Update helper missing");
+        return false;
+    }
+
+    qint64 pid = 0;
+    const bool started = QProcess::startDetached(
+        QStringLiteral("cmd.exe"),
+        {QStringLiteral("/c"),
+         QStringLiteral("start"),
+         QStringLiteral("/min"),
+         QStringLiteral(""),
+         absoluteNativePath(helperPath)},
+        windowsLocalUpdateDir(),
+        &pid);
+    if (!started || pid <= 0) {
+        if (errorOut)
+            *errorOut = QStringLiteral("Failed to start update helper");
+        return false;
+    }
+    return true;
 }
 
 } // namespace
@@ -499,9 +459,9 @@ void UpdateChecker::simulateUpdatePreview()
         if (m_installLaunched)
             return;
 
-        m_latestVersion = QStringLiteral("0.2.1");
-        m_downloadUrl = QStringLiteral("https://github.com/MeowYewy/Mosaic/releases/download/v0.2.1/"
-                                       "Mosaic_0.2.1_win64_Setup.exe");
+        m_latestVersion = QStringLiteral("0.2.2");
+        m_downloadUrl = QStringLiteral("https://github.com/MeowYewy/Mosaic/releases/download/v0.2.2/"
+                                       "Mosaic_0.2.2_win64_Setup.exe");
         m_downloadProgress = 100;
         emit latestVersionChanged();
         emit downloadUrlChanged();
@@ -866,7 +826,7 @@ void UpdateChecker::finishInstallerSave(const QByteArray &payload, const QString
     if (fileName.isEmpty() || !fileName.endsWith(QLatin1String(".exe"), Qt::CaseInsensitive))
         fileName = QStringLiteral("Mosaic_%1_update.exe").arg(m_latestVersion);
 
-    const QString destPath = QDir(localUpdateCacheDir()).filePath(fileName);
+    const QString destPath = QDir(windowsLocalUpdateDir()).filePath(fileName);
 
     if (QFile::exists(destPath))
         QFile::remove(destPath);
@@ -914,8 +874,15 @@ void UpdateChecker::installUpdate()
     if (m_installLaunched)
         return;
 
-    if (m_installerPath.isEmpty() || !QFile::exists(m_installerPath)
-        || !looksLikeWindowsInstaller(m_installerPath)) {
+    if (m_installerPath.isEmpty() || !looksLikeWindowsInstaller(m_installerPath)) {
+        m_installerPath.clear();
+        setStatus(DownloadFailed);
+        return;
+    }
+
+    QString error;
+    const QString localInstaller = ensureLocalInstallerPath(m_installerPath, &error);
+    if (localInstaller.isEmpty()) {
         m_installerPath.clear();
         setStatus(DownloadFailed);
         return;
@@ -924,15 +891,14 @@ void UpdateChecker::installUpdate()
     const QString argsLine = normalizeSilentInstallArgs(
         m_silentInstallArgs.trimmed().isEmpty() ? QString::fromUtf8(kDefaultSilentInstallArgs)
                                                 : m_silentInstallArgs);
-    const QStringList args = silentInstallArgList(argsLine);
 
-    QString error;
-    if (!launchInstallerDetached(m_installerPath, args, &error)) {
+    if (!writeUpdateHelperScript(localInstaller, argsLine, &error)
+        || !launchUpdateHelper(&error)) {
         setStatus(DownloadFailed);
         return;
     }
 
     m_installLaunched = true;
     abortAllNetworkReplies();
-    QTimer::singleShot(500, this, [this]() { quitForInstaller(); });
+    quitForInstaller();
 }

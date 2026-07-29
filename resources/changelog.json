@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.2.2",
+    "date": "2026-07-29",
+    "notes": {
+      "zh_CN": "修复应用内更新安装。",
+      "en": "Fixed in-app update installation."
+    }
+  },
+  {
     "version": "0.2.1",
     "date": "2026-07-29",
     "notes": {
