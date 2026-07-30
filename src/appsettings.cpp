@@ -252,6 +252,39 @@ void AppSettings::setAiOcrCloudMode(const QString &value)
     emit aiSettingsChanged();
 }
 
+bool AppSettings::applyRedeemedAiConfig(const QString &mode,
+                                        const QString &apiBase,
+                                        const QString &apiKey,
+                                        const QString &model,
+                                        const QString &ocrCloudMode,
+                                        QString *errorOut)
+{
+    const QString normalizedMode = mode.trimmed().toLower();
+    if (normalizedMode != QLatin1String("text")
+        && normalizedMode != QLatin1String("qwen_ocr")) {
+        if (errorOut)
+            *errorOut = trKey(QStringLiteral("redeemInvalidConfig"));
+        return false;
+    }
+
+    const QString base = apiBase.trimmed();
+    const QString key = normalizeAiApiKey(apiKey);
+    const QString modelName = model.trimmed();
+    if (base.isEmpty() || key.isEmpty() || modelName.isEmpty()) {
+        if (errorOut)
+            *errorOut = trKey(QStringLiteral("redeemInvalidConfig"));
+        return false;
+    }
+
+    setAiMarkMode(normalizedMode);
+    setAiApiBase(base);
+    setAiModel(modelName);
+    if (normalizedMode == QLatin1String("qwen_ocr"))
+        setAiOcrCloudMode(ocrCloudMode);
+    setAiApiKey(key);
+    return true;
+}
+
 bool AppSettings::privacyMaskEnabled(const QString &key) const
 {
     return m_privacyPolicy.enabledForKey(key);
@@ -653,6 +686,15 @@ QString AppSettings::trKey(const QString &key) const
             {QStringLiteral("zh_CN"), QStringLiteral("AI 分析失败：%1")},
             {QStringLiteral("en"), QStringLiteral("AI analysis failed: %1")},
         }},
+        {QStringLiteral("aiGatewayTimeout"), {
+            {QStringLiteral("zh_CN"),
+             QStringLiteral("AI 网关连接超时。大文件单页 OCR 可能需数分钟：请在宝塔 /gateway/ 反代里把 "
+                            "proxy_read_timeout 调到 1800 秒，并确认网关 upstreamTimeout 为 1200。")},
+            {QStringLiteral("en"),
+             QStringLiteral("AI gateway timed out. Large pages can take several minutes: set "
+                            "proxy_read_timeout to 1800s on /gateway/, and upstreamTimeout to 1200 "
+                            "in gateway.windows.json.")},
+        }},
         {QStringLiteral("aiAuthFailed"), {
             {QStringLiteral("zh_CN"), QStringLiteral("API Key 无效或与 API 地址不匹配。Kimi 用 api.moonshot.cn/v1；千问用 dashscope.aliyuncs.com/compatible-mode/v1。Key 仅填 sk- 开头，不要带 Bearer")},
             {QStringLiteral("en"), QStringLiteral("Invalid API key or base URL. Kimi: api.moonshot.cn/v1. Qwen: dashscope.aliyuncs.com/compatible-mode/v1. Paste sk-... only.")},
@@ -712,6 +754,74 @@ QString AppSettings::trKey(const QString &key) const
         {QStringLiteral("settingAiQwenOcr"), {
             {QStringLiteral("zh_CN"), QStringLiteral("千问 OCR")},
             {QStringLiteral("en"), QStringLiteral("Qwen OCR")},
+        }},
+        {QStringLiteral("settingRedeemSection"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("兑换码")},
+            {QStringLiteral("en"), QStringLiteral("Redemption code")},
+        }},
+        {QStringLiteral("settingRedeemCodePlaceholder"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("MOS-XXXX-XXXX-XXXX")},
+            {QStringLiteral("en"), QStringLiteral("MOS-XXXX-XXXX-XXXX")},
+        }},
+        {QStringLiteral("settingRedeemButton"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("兑换码")},
+            {QStringLiteral("en"), QStringLiteral("Redemption code")},
+        }},
+        {QStringLiteral("redeemEnterCode"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("请输入兑换码。")},
+            {QStringLiteral("en"), QStringLiteral("Enter a redemption code.")},
+        }},
+        {QStringLiteral("redeemServerNotConfigured"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("未配置兑换服务器地址。")},
+            {QStringLiteral("en"), QStringLiteral("The redemption server is not configured.")},
+        }},
+        {QStringLiteral("redeemWorking"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("正在兑换…")},
+            {QStringLiteral("en"), QStringLiteral("Redeeming...")},
+        }},
+        {QStringLiteral("redeemInvalid"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("兑换码无效。")},
+            {QStringLiteral("en"), QStringLiteral("Invalid redemption code.")},
+        }},
+        {QStringLiteral("redeemExhausted"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("兑换码可用次数已用完。")},
+            {QStringLiteral("en"), QStringLiteral("This code has no remaining activations.")},
+        }},
+        {QStringLiteral("redeemDisabled"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("兑换码或设备已被停用。")},
+            {QStringLiteral("en"), QStringLiteral("This code or device has been disabled.")},
+        }},
+        {QStringLiteral("redeemExpired"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("兑换码已过期。")},
+            {QStringLiteral("en"), QStringLiteral("This redemption code has expired.")},
+        }},
+        {QStringLiteral("redeemRateLimited"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("请求过于频繁，请稍后再试。")},
+            {QStringLiteral("en"), QStringLiteral("Too many attempts. Try again later.")},
+        }},
+        {QStringLiteral("redeemServerError"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("兑换服务器错误，请稍后再试。")},
+            {QStringLiteral("en"), QStringLiteral("Redemption server error. Try again later.")},
+        }},
+        {QStringLiteral("redeemNetworkError"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("无法连接兑换服务器，请检查网络。")},
+            {QStringLiteral("en"), QStringLiteral("Cannot reach the redemption server. Check your network.")},
+        }},
+        {QStringLiteral("redeemInvalidConfig"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("服务器返回的配置无效。")},
+            {QStringLiteral("en"), QStringLiteral("The server returned an invalid configuration.")},
+        }},
+        {QStringLiteral("redeemSuccess"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("兑换成功，AI 脱敏已配置。")},
+            {QStringLiteral("en"), QStringLiteral("Redeemed. AI redaction is configured.")},
+        }},
+        {QStringLiteral("redeemSuccessExisting"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("此设备已兑换过该码，配置已刷新。")},
+            {QStringLiteral("en"), QStringLiteral("This device already redeemed this code. Settings refreshed.")},
+        }},
+        {QStringLiteral("redeemSuccessRemaining"), {
+            {QStringLiteral("zh_CN"), QStringLiteral("兑换成功，还可激活 %1 台新设备。")},
+            {QStringLiteral("en"), QStringLiteral("Redeemed. %1 new device activation(s) remain.")},
         }},
         {QStringLiteral("settingPrivacySection"), {
             {QStringLiteral("zh_CN"), QStringLiteral("脱敏项目")},

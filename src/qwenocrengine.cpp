@@ -19,12 +19,21 @@ constexpr qint64 kUploadMaxPixels = 2'000'000;
 constexpr int kUploadMaxDimension = 1600;
 constexpr int kMinPixels = 3072;
 constexpr int kJpegQuality = 78;
-constexpr int kTransferTimeoutMs = 120'000;
+// Large medical pages can take many minutes per multimodal OCR call.
+constexpr int kTransferTimeoutMs = 20 * 60'000;
 
-QString multimodalGenerationUrl()
+QString multimodalGenerationUrl(const AiMarkConfig &config)
 {
-    return QStringLiteral(
-        "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation");
+    QString base = config.apiBaseUrl.trimmed();
+    if (base.isEmpty())
+        base = QStringLiteral("https://dashscope.aliyuncs.com/api/v1");
+    while (base.endsWith(QLatin1Char('/')))
+        base.chop(1);
+    const QString suffix =
+        QStringLiteral("/services/aigc/multimodal-generation/generation");
+    if (base.endsWith(suffix))
+        return base;
+    return base + suffix;
 }
 
 QString modelName(const AiMarkConfig &config)
@@ -225,7 +234,7 @@ QJsonObject postMultimodal(const AiMarkConfig &config,
     if (errorOut)
         errorOut->clear();
 
-    const QUrl url(multimodalGenerationUrl());
+    const QUrl url(multimodalGenerationUrl(config));
     QNetworkRequest networkRequest(url);
     networkRequest.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     networkRequest.setRawHeader("Authorization",
@@ -240,9 +249,15 @@ QJsonObject postMultimodal(const AiMarkConfig &config,
     loop.exec();
 
     const QByteArray payload = reply->readAll();
+    const int httpStatus =
+        reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     if (reply->error() != QNetworkReply::NoError) {
-        if (errorOut)
-            *errorOut = parseApiErrorMessage(payload, reply->errorString());
+        if (errorOut) {
+            QString message = parseApiErrorMessage(payload, reply->errorString());
+            if (httpStatus >= 400 && !message.contains(QStringLiteral("HTTP ")))
+                message = QStringLiteral("HTTP %1: %2").arg(httpStatus).arg(message);
+            *errorOut = message;
+        }
         reply->deleteLater();
         return {};
     }

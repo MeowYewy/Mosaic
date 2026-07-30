@@ -49,10 +49,10 @@ QtObject {
     readonly property color success: dark ? "#3ECF9A" : "#34C759"
     readonly property color danger: "#FF3B30"
     readonly property color maskAuto: "#F59E0B"
-    readonly property color maskAutoFill: dark ? "#F59E0B28" : "#F59E0B30"
+    readonly property color maskAutoFill: "transparent"
     readonly property color maskManual: dark ? "#14B8A6" : "#0F766E"
-    readonly property color maskManualFill: dark ? "#0F766E44" : "#0F766E44"
-    readonly property color maskManualDraft: dark ? "#0F766E33" : "#0F766E33"
+    readonly property color maskManualFill: dark ? "#0F766E66" : "#0F766E77"
+    readonly property color maskManualDraft: dark ? "#0F766E55" : "#0F766E55"
     readonly property color maskAccent: accent
 
     readonly property int compactControlWidth: 96

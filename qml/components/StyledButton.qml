@@ -4,8 +4,10 @@ import ProjectO
 
 Button {
     id: control
-    implicitHeight: 36
-    padding: 10
+    property bool compact: false
+
+    implicitHeight: compact ? 28 : 36
+    padding: compact ? 6 : 10
     hoverEnabled: control.enabled
     scale: control.enabled && control.down ? 0.97 : 1.0
     opacity: control.enabled ? 1.0 : 0.52
@@ -29,7 +31,9 @@ Button {
 
     contentItem: Text {
         text: control.text
-        font: control.highlighted ? Theme.mainFontBold : Theme.mainFont
+        font: control.compact
+               ? Theme.captionFont
+               : (control.highlighted ? Theme.mainFontBold : Theme.mainFont)
         color: !control.enabled
                ? Theme.textSecondary
                : (control.highlighted ? "#FFFFFF" : Theme.text)

@@ -14,6 +14,8 @@ ColumnLayout {
     property bool secret: false
     property bool enabled: true
 
+    readonly property string currentText: field.text
+
     signal edited(string text)
 
     function commit() {
@@ -33,28 +35,17 @@ ColumnLayout {
         color: Theme.textSecondary
     }
 
-    TextField {
+    ThemedTextField {
         id: field
         Layout.fillWidth: true
-        Layout.preferredHeight: 38
         text: row.value
         placeholderText: row.placeholderText
-        font: Theme.mainFont
-        color: Theme.text
-        placeholderTextColor: Theme.textSecondary
         echoMode: row.secret ? TextInput.Password : TextInput.Normal
-        selectByMouse: true
         enabled: row.enabled
         readOnly: !row.enabled
-        onTextChanged: saveTimer.restart()
+        onTextEdited: saveTimer.restart()
         onEditingFinished: row.commit()
         onAccepted: row.commit()
-        background: Rectangle {
-            radius: Theme.radiusSm
-            color: Theme.surfaceAlt
-            border.color: field.activeFocus ? Theme.accent : Theme.border
-            border.width: field.activeFocus ? 2 : 1
-        }
     }
 
     Timer {

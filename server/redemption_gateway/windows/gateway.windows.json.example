@@ -1,0 +1,11 @@
+{
+  "pythonExe": "C:\\Python313\\python.exe",
+  "host": "127.0.0.1",
+  "port": 8787,
+  "publicBaseUrl": "http://YOUR_DOMAIN_OR_IP",
+  "database": "C:\\MosaicGateway\\data\\gateway.sqlite3",
+  "upstreamTimeout": 1200,
+  "maxBodyMb": 20,
+  "redeemAttemptsPerMinute": 20,
+  "maxWorkers": 8
+}

@@ -38,16 +38,6 @@ Rectangle {
 
         Item { Layout.fillWidth: true; Layout.minimumWidth: 8 }
 
-        Text {
-            Layout.alignment: Qt.AlignVCenter
-            Layout.maximumWidth: 420
-            text: Theme.tr("devDisclaimer")
-            font: Theme.captionFont
-            color: Theme.textSecondary
-            wrapMode: Text.Wrap
-            horizontalAlignment: Text.AlignRight
-        }
-
         Item {
             Layout.preferredWidth: 36
             Layout.preferredHeight: 36

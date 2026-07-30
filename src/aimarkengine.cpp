@@ -435,7 +435,7 @@ QVector<AiMarkHit> AiMarkEngine::analyzePage(const AiMarkConfig &config,
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     request.setRawHeader("Authorization",
                          QByteArray("Bearer ") + config.apiKey.trimmed().toUtf8());
-    request.setTransferTimeout(120'000);
+    request.setTransferTimeout(20 * 60'000);
 
     QNetworkAccessManager manager;
     QNetworkReply *reply = manager.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));

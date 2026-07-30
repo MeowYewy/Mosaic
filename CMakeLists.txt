@@ -52,6 +52,7 @@ set(SOURCES
     src/textregionmapper.cpp
     src/privacyformmapper.cpp
     src/updatechecker.cpp
+    src/redemptionclient.cpp
     src/filedropbridge.cpp
     src/pdf/pdfappcontroller.cpp
     src/pdf/pdffilelistmodel.cpp
@@ -85,6 +86,7 @@ set(HEADERS
     src/textregionmapper.h
     src/privacyformmapper.h
     src/updatechecker.h
+    src/redemptionclient.h
     src/filedropbridge.h
     src/pdf/pdfappcontroller.h
     src/pdf/pdffilelistmodel.h
@@ -135,6 +137,8 @@ qt_add_qml_module(Mosaic
         qml/components/SettingsDialog.qml
         qml/components/SettingsOptionRow.qml
         qml/components/SettingsTextRow.qml
+        qml/components/ThemedTextField.qml
+        qml/components/RedeemCodeDialog.qml
         qml/components/SettingsIdCardDigitRow.qml
         qml/components/ShortcutInfoTip.qml
         qml/components/AppLogo.qml
@@ -179,6 +183,7 @@ qt_add_qml_module(Mosaic
         resources/app-icon.ico
         resources/update.json
         resources/changelog.json
+        resources/redemption.json
         resources/icons/full-screen.svg
         resources/icons/expand.svg
         resources/icons/shrink.svg

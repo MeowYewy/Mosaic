@@ -66,6 +66,12 @@ public:
     Q_INVOKABLE void setAiMarkMode(const QString &value);
     Q_INVOKABLE void setAiOcrCloudMode(const QString &value);
     Q_INVOKABLE void applyAiPreset(const QString &presetId);
+    bool applyRedeemedAiConfig(const QString &mode,
+                               const QString &apiBase,
+                               const QString &apiKey,
+                               const QString &model,
+                               const QString &ocrCloudMode,
+                               QString *errorOut = nullptr);
     Q_INVOKABLE bool privacyMaskEnabled(const QString &key) const;
     Q_INVOKABLE void setPrivacyMaskEnabled(const QString &key, bool enabled);
     Q_INVOKABLE bool idCardDigitEnabled(int digit) const;

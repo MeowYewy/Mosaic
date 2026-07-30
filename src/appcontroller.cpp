@@ -1178,6 +1178,9 @@ void AppController::runAiMarking()
             else if (result.error.contains(QStringLiteral("Authentication"), Qt::CaseInsensitive)
                      || result.error.contains(QStringLiteral("Unauthorized"), Qt::CaseInsensitive))
                 msg = m_settings->trKey(QStringLiteral("aiAuthFailed"));
+            else if (result.error.contains(QStringLiteral("timed out"), Qt::CaseInsensitive)
+                     && m_settings->aiApiKey().trimmed().startsWith(QStringLiteral("mosaic_at_")))
+                msg = m_settings->trKey(QStringLiteral("aiGatewayTimeout"));
             else if (result.error.isEmpty())
                 msg = m_settings->trKey(QStringLiteral("aiMarkFailed")).arg(QStringLiteral("unknown"));
             else

@@ -36,7 +36,13 @@ Item {
         closeAnim.restart()
     }
 
-    Keys.onEscapePressed: root.close()
+    Keys.onEscapePressed: {
+        if (redeemDialog.shown) {
+            redeemDialog.close()
+            return
+        }
+        root.close()
+    }
 
     ParallelAnimation {
         id: openAnim
@@ -63,24 +69,29 @@ Item {
         id: card
         anchors.centerIn: parent
         width: 380
-        height: Math.min(settingsScroll.contentHeight + 36, parent.height * 0.86)
+        height: Math.min(settingsScroll.contentHeight + 32, parent.height * 0.86)
         radius: Theme.radiusLg
         color: Theme.surface
         border.color: Theme.border
         border.width: 1
         scale: root.cardScale
+        transformOrigin: Item.Center
         clip: false
 
         ScrollView {
             id: settingsScroll
             anchors.fill: parent
-            anchors.margins: 16
+            anchors.topMargin: 16
+            anchors.bottomMargin: 16
+            anchors.leftMargin: 16
+            anchors.rightMargin: 3
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
             ColumnLayout {
                 id: settingsColumn
-                width: settingsScroll.availableWidth
+                // Overlay scrollbar on Windows sits on content; reserve a fixed gutter.
+                width: Math.max(0, settingsScroll.width - 13)
                 spacing: 12
 
             Text {
@@ -173,11 +184,21 @@ Item {
                 color: Theme.border
             }
 
-            Text {
+            RowLayout {
                 Layout.fillWidth: true
-                text: Theme.tr("settingAiSection")
-                font: Theme.mainFontBold
-                color: Theme.text
+                spacing: 8
+
+                Text {
+                    Layout.fillWidth: true
+                    text: Theme.tr("settingAiSection")
+                    font: Theme.mainFontBold
+                    color: Theme.text
+                }
+
+                StyledButton {
+                    text: Theme.tr("settingRedeemButton")
+                    onClicked: redeemDialog.open()
+                }
             }
 
             RowLayout {
@@ -284,10 +305,11 @@ Item {
             SettingsTextRow {
                 id: aiApiBaseRow
                 Layout.fillWidth: true
-                visible: AppSettings.aiMarkMode === "text"
                 label: Theme.tr("settingAiApiBase")
                 value: AppSettings.aiApiBase
-                placeholderText: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+                placeholderText: AppSettings.aiMarkMode === "qwen_ocr"
+                                 ? "https://dashscope.aliyuncs.com/api/v1"
+                                 : "https://dashscope.aliyuncs.com/compatible-mode/v1"
                 onEdited: function(text) { AppSettings.setAiApiBase(text) }
             }
 
@@ -307,7 +329,6 @@ Item {
                 label: Theme.tr("settingAiModel")
                 value: AppSettings.aiModel
                 placeholderText: AppSettings.aiMarkMode === "qwen_ocr" ? "qwen3.5-ocr" : "qwen-plus"
-                enabled: AppSettings.aiMarkMode === "text"
                 onEdited: function(text) { AppSettings.setAiModel(text) }
             }
 
@@ -323,14 +344,6 @@ Item {
                 text: Theme.tr("settingPrivacySection")
                 font: Theme.mainFontBold
                 color: Theme.text
-            }
-
-            Text {
-                Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                text: Theme.tr("settingPrivacyHint")
-                font: Theme.captionFont
-                color: Theme.textSecondary
             }
 
             SettingsOptionRow {
@@ -422,5 +435,10 @@ Item {
             }
             }
         }
+    }
+
+    RedeemCodeDialog {
+        id: redeemDialog
+        anchors.fill: parent
     }
 }

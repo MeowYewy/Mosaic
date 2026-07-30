@@ -3,6 +3,7 @@
 #include "pipelinediag.h"
 #include "previewimageprovider.h"
 #include "updatechecker.h"
+#include "redemptionclient.h"
 #include "filedropbridge.h"
 
 #include "filepicker.h"
@@ -50,6 +51,7 @@ int main(int argc, char *argv[])
     auto *pdfThumbProvider = new PdfThumbProvider();
     AppSettings settings;
     UpdateChecker updateChecker;
+    RedemptionClient redemptionClient(&settings);
     FileDropBridge fileDropBridge;
     FilePicker filePicker(&settings);
     PdfAppController pdfController(pdfThumbProvider, &settings, &filePicker);
@@ -78,6 +80,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("AppController"), &maskController);
     engine.rootContext()->setContextProperty(QStringLiteral("FilePicker"), &filePicker);
     engine.rootContext()->setContextProperty(QStringLiteral("UpdateChecker"), &updateChecker);
+    engine.rootContext()->setContextProperty(QStringLiteral("RedemptionClient"), &redemptionClient);
     engine.rootContext()->setContextProperty(QStringLiteral("FileDropBridge"), &fileDropBridge);
 
     QStringList qmlErrors;

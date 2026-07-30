@@ -1,0 +1,22 @@
+[Unit]
+Description=Mosaic redemption and AI gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mosaic
+Group=mosaic
+WorkingDirectory=/opt/mosaic-redemption
+EnvironmentFile=/etc/mosaic-redemption.env
+ExecStart=/usr/bin/python3 /opt/mosaic-redemption/gateway.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mosaic-redemption
+
+[Install]
+WantedBy=multi-user.target

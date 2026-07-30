@@ -263,7 +263,8 @@ Rectangle {
                     required property real rw
                     required property real rh
                     required property string source
-                    required property bool isSelected
+
+                    readonly property bool isSelected: AppController.redactions.selectedId === regionId
 
                     readonly property bool isEditing: canvas.editRegionId === regionId
                     readonly property real curRx: isEditing ? canvas.editRx : rx
@@ -281,7 +282,7 @@ Rectangle {
                         anchors.fill: parent
                         color: source === "fixed" ? "#6366F133"
                               : (source === "manual" ? Theme.maskManualFill : Theme.maskAutoFill)
-                        border.width: isSelected ? 2 : 1
+                        border.width: source === "auto" ? 2 : (isSelected ? 2 : 1)
                         border.color: source === "fixed" ? "#6366F1"
                                     : (source === "manual" ? Theme.maskManual : Theme.maskAuto)
                     }
@@ -351,10 +352,19 @@ Rectangle {
                         visible: isSelected && AppController.toolMode === "select"
                         width: visible ? 20 : 0
                         height: visible ? 20 : 0
-                        z: 20
+                        z: 21
+
+                        Rectangle {
+                            anchors.centerIn: parent
+                            width: 12
+                            height: 12
+                            radius: 2
+                            color: Theme.accent
+                        }
 
                         MouseArea {
                             anchors.fill: parent
+                            anchors.margins: -6
                             cursorShape: Qt.SizeFDiagCursor
                             preventStealing: true
                             property real originX
@@ -389,19 +399,6 @@ Rectangle {
                             }
                             onCanceled: canvas.endEdit()
                         }
-                    }
-
-                    Rectangle {
-                        visible: isSelected && AppController.toolMode === "select"
-                        anchors.right: parent.right
-                        anchors.bottom: parent.bottom
-                        anchors.margins: -5
-                        width: 12
-                        height: 12
-                        radius: 2
-                        color: Theme.accent
-                        z: 21
-                        enabled: false
                     }
                 }
             }
