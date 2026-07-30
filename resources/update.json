@@ -2,5 +2,5 @@
   "version": "0.2.1",
   "downloadUrl": "https://github.com/MeowYewy/Mosaic/releases/download/v0.2.1/Mosaic_0.2.1_win64_Setup.exe",
   "silentInstallArgs": "/SILENT /SUPPRESSMSGBOXES /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS",
-  "releaseNotes": "新增API配置模板；"
+  "releaseNotes": "新增API配置模板。"
 }
