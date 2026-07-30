@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.21)
-project(Mosaic VERSION 0.2.0 LANGUAGES CXX)
+
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/APP_VERSION.txt" MOSAIC_APP_VERSION)
+string(STRIP "${MOSAIC_APP_VERSION}" MOSAIC_APP_VERSION)
+if(MOSAIC_APP_VERSION STREQUAL "")
+    set(MOSAIC_APP_VERSION "0.0.0")
+endif()
+
+project(Mosaic VERSION ${MOSAIC_APP_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -100,6 +107,8 @@ set(HEADERS
 )
 
 qt_add_executable(Mosaic ${SOURCES} ${HEADERS})
+
+target_compile_definitions(Mosaic PRIVATE MOSAIC_APP_VERSION="${MOSAIC_APP_VERSION}")
 
 target_include_directories(Mosaic PRIVATE
     "${CMAKE_SOURCE_DIR}/src"
